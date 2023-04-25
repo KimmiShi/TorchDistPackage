@@ -1,6 +1,8 @@
 import os
 import subprocess
 
+import torch.distribued as dist
+
 # TODO: this func is not exmamined
 def find_free_port():
     import socket
@@ -42,4 +44,8 @@ def setup_distributed_slurm(backend="nccl", port=None):
         rank = int(os.environ["RANK"])
         world_size = int(os.environ["WORLD_SIZE"])
         local_rank = rank % num_gpus
+
+    dist.init_process_group(rank=rank, world_size=world_size, backend=backend)
+
+    print(f"dist init done, world_size = {dist.get_world_size()}")
     return rank, world_size, port, addr

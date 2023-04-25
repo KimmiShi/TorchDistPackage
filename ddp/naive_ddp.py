@@ -5,9 +5,6 @@ import torch
 import torch.distributed as dist
 from threading import Lock
 
-# from ..core import allreduce, get_world_size, get_group_size, broadcast, synchronize
-# from ..comm import allreduce_async, allreduce_async_nocoord
-
 __all__ = ['SdxDdp']
 
 
@@ -41,7 +38,6 @@ class SdxDdp(torch.nn.Module):
 
         self.broadcast_params()
 
-        # self.use_nocoord = os.getenv('LINKLINK_ALLREDUCE_USE_NCCL_STREAM', '0') == '1'
         self.use_nocoord = False
         self.sync = sync
         self.gradient_as_bucket_view = gradient_as_bucket_view
@@ -62,8 +58,6 @@ class SdxDdp(torch.nn.Module):
             self.first_iter_queue.reverse()
 
     def forward(self, *inputs, **kwargs):
-        # sync reduce stream before next forward
-        self.reduce_stream.synchronize()
         return self.module(*inputs, **kwargs)
 
     def _register_hooks(self):
@@ -80,30 +74,32 @@ class SdxDdp(torch.nn.Module):
                 self.first_iter_queue.append(name)
 
     def _get_group(self, name, param):
-        if hasattr(param, '_reduce_group') and param._reduce_group:
-            return param._reduce_group
-        return self.params_to_group.get(name, self.group)
+        return self.group
 
-    def _reduce_grads(self, name, grad, group):
+    def _reduce_grads(self, grad, group):
         if self.sync:
             dist.all_reduce(grad, group=group)
-        elif self.use_nocoord:
-            allreduce_async_nocoord(grad, group)
         else:
             with torch.cuda.stream(self.reduce_stream):
-                dist.all_reduce(name, grad, group, async_op=True)
+                try:
+                    dist.all_reduce(grad, group=self.group, async_op=False)
+                except Exception as e:
+                    import pdb;pdb.set_trace()
+                    print("Exception at _reduce_grads")
 
     def _do_grad_reduce(self, name, p, idx):
-        should_bucket = lambda grad: self._get_group(name, p) == 0 and \
-            grad.element_size() * grad.numel() < self.bucket_cap_bytes * 4 // 5
+        should_bucket = lambda grad: grad.element_size() * grad.numel() < self.bucket_cap_bytes * 4 // 5
         if self.gradient_as_bucket_view and should_bucket(p.grad):
+            # if param has no "bucket", assign a 'bucket' to this param
             if not hasattr(p, 'grad_bucket'):
                 bucket_info = (p.grad.dtype, p.grad.device, self._get_group(name, p))
 
                 bucket = None
+                # if bucket_info exists, get a existing bucket
                 if bucket_info in self.buckets:
                     bucket = self.buckets[bucket_info]
 
+                # if no existing bucket or bucket cannot hold current param, create a new bucket
                 if not bucket or not bucket.can_fit(p.grad):
                     bucket = self.buckets[bucket_info] = GradBucket(
                         f'grad_bucket_{self.buckets_idx}', self.bucket_cap_bytes, p.grad.element_size(), bucket_info)
@@ -111,30 +107,31 @@ class SdxDdp(torch.nn.Module):
 
                 p.grad = bucket.push(name, p.grad)
                 p.grad_bucket = bucket
-                self._reduce_grads(name, p.grad.data, self._get_group(name, p))
-            else:
+
+                # launch a reduce every time a new tensor comes
+                self._reduce_grads(p.grad.data, self._get_group(name, p))
+
+                # we should remove the full buckets from self to make sure that bucket is not resued?
+                #       not needed, since the bucket will be full, and will be replaced by next new bucket
+
+            else:   # if param already has a 'bucket', mark current bucket is ready, and if bucket is ready, reduce the bucket
                 bucket = p.grad_bucket
                 if bucket.grad_ready():
-                    self._reduce_grads(bucket.name, bucket.data, bucket.group)
+                    self._reduce_grads(bucket.data, bucket.group)
                     bucket.grad_reset()
         else:
-            self._reduce_grads(name, p.grad.data, self._get_group(name, p))
+            self._reduce_grads(p.grad.data, self._get_group(name, p))
 
     def _make_hook(self, name, p, i):
         def hook(*ignore):
             # make grad thread safe
             with self.lock:
-                assert self.param_infos[name].grad_ready_iter < self.num_iter
+                if self.param_infos[name].grad_ready_iter >= self.num_iter:
+                    print("self.param_infos[name].grad_ready_iter >= self.num_iter", name, self.num_iter)
                 self.param_infos[name].grad_ready_iter = self.num_iter
 
-                grad_queue = self.first_iter_queue if self.num_iter == 0 else self.grad_ready_queue
-                if self.num_iter == 0:
-                    self.grad_ready_queue.append(name)
-                while self._grad_is_ready(grad_queue, self.current_reduce_idx):
-                    pname = grad_queue[self.current_reduce_idx]
-                    pn, pp, pi = self.param_infos[pname].get_info()
-                    self._do_grad_reduce(pn, pp, pi)
-                    self.current_reduce_idx += 1
+                self._do_grad_reduce(name, p, i)
+
         return hook
 
     def _grad_is_ready(self, grad_queue, index):
@@ -142,23 +139,6 @@ class SdxDdp(torch.nn.Module):
             return False
         name = grad_queue[index]
         return self.param_infos[name].grad_ready_iter >= self.num_iter
-
-    def _broadcast_reduce_order(self):
-        # serialize to tensor
-        buffer = pickle.dumps(self.grad_ready_queue)
-        storage = torch.ByteStorage.from_buffer(buffer)
-        tensor = torch.ByteTensor(storage).to(device=torch.device("cpu"))
-        # broadcast rand_0's reduce order
-        dist.broadcast(tensor, 0)
-
-        # deserialize
-        grad_ready_queue_zero = pickle.loads(tensor.numpy().tobytes())
-
-        # check
-        assert len(grad_ready_queue_zero) == len(self.grad_ready_queue)
-        assert set(grad_ready_queue_zero) == set(self.grad_ready_queue)
-
-        self.grad_ready_queue = grad_ready_queue_zero
 
     def _reset_iter(self):
         self.num_iter += 1
@@ -171,6 +151,7 @@ class SdxDdp(torch.nn.Module):
         if dist.get_world_size(self.group) <= 1:
             return
 
+        import pdb;pdb.set_trace()
         if self.sync:
             for i, (name, param) in enumerate(self.module.named_parameters()):
                 if name not in self.parameters_to_ignore and param.requires_grad and param.grad is not None:
@@ -178,16 +159,9 @@ class SdxDdp(torch.nn.Module):
                         continue
                     self._do_grad_reduce(name, param, i)
         else:
-            if self.use_nocoord:
-                dummy = torch.rand(1).cuda()
-                allreduce_async_nocoord(dummy, wait=True, group=self.group)
+            beg = time.time()
             torch.cuda.synchronize()
-
-            # when first iteration, we need to fix the order of gradient reduction
-            # this is necessary when multi thread backward used and the gradient
-            # reduction hook is called in arbitrary order
-            if self.num_iter == 0:
-                self._broadcast_reduce_order()
+            print(f"ddp done grad sync in {time.time()-beg} s")
 
         self._reset_iter()
 
@@ -195,9 +169,6 @@ class SdxDdp(torch.nn.Module):
         """ broadcast model parameters """
         for name, param in self.module.state_dict().items():
             if name not in self.parameters_to_ignore:
-                # pass
-                # import pdb;pdb.set_trace()
-                # broadcast(param, 0, group=self._get_group(name, param))
                 dist.broadcast(param, self.dp_rank0, group=self._get_group(name, param))
 
 
