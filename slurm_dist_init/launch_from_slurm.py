@@ -47,5 +47,7 @@ def setup_distributed_slurm(backend="nccl", port=None):
 
     dist.init_process_group(rank=rank, world_size=world_size, backend=backend)
 
+    device = rank % torch.cuda.device_count()
+    torch.cuda.set_device(device)
     print(f"dist init done, world_size = {dist.get_world_size()}")
     return rank, world_size, port, addr

@@ -1,9 +1,11 @@
 import os
-import pickle
+import time
+from threading import Lock
 
 import torch
 import torch.distributed as dist
-from threading import Lock
+from torch.distributed import ReduceOp
+
 
 __all__ = ['SdxDdp']
 
@@ -23,7 +25,8 @@ class SdxDdp(torch.nn.Module):
                  gradient_as_bucket_view=False,
                  process_group=None,
                  params_to_group=None,
-                 dp_rank0=0):
+                 dp_rank0=0,
+                 reduce_op="avg"):
         super(SdxDdp, self).__init__()
         self.module = module
 
@@ -35,6 +38,7 @@ class SdxDdp(torch.nn.Module):
         self.group = process_group or None
         self.dp_rank0 = dp_rank0
         self.params_to_group = params_to_group or {}
+        self.reduce_op = ReduceOp.SUM if reduce_op.lower == 'sum' else ReduceOp.AVG
 
         self.broadcast_params()
 
@@ -48,14 +52,11 @@ class SdxDdp(torch.nn.Module):
         self.num_iter = 0
         self.param_infos = {}
         self.lock = Lock()
-        self.current_reduce_idx = 0
-        self.grad_ready_queue = []
-        self.first_iter_queue = []
+
         self.reduce_stream = torch.cuda.Stream()
         if not sync and dist.get_world_size(self.group) > 1:
             self._grad_accs = []
             self._register_hooks()
-            self.first_iter_queue.reverse()
 
     def forward(self, *inputs, **kwargs):
         return self.module(*inputs, **kwargs)
@@ -71,18 +72,17 @@ class SdxDdp(torch.nn.Module):
                 grad_acc.register_hook(self._make_hook(name, p, i))
                 self._grad_accs.append(grad_acc)
                 self.param_infos[name] = ParamInfo(name, p, i, self._get_group(name, p))
-                self.first_iter_queue.append(name)
 
     def _get_group(self, name, param):
         return self.group
 
     def _reduce_grads(self, grad, group):
         if self.sync:
-            dist.all_reduce(grad, group=group)
+            dist.all_reduce(grad, group=group, op=self.reduce_op)
         else:
             with torch.cuda.stream(self.reduce_stream):
                 try:
-                    dist.all_reduce(grad, group=self.group, async_op=False)
+                    dist.all_reduce(grad, group=self.group, async_op=False, op=self.reduce_op)
                 except Exception as e:
                     import pdb;pdb.set_trace()
                     print("Exception at _reduce_grads")
@@ -126,23 +126,12 @@ class SdxDdp(torch.nn.Module):
         def hook(*ignore):
             # make grad thread safe
             with self.lock:
-                if self.param_infos[name].grad_ready_iter >= self.num_iter:
-                    print("self.param_infos[name].grad_ready_iter >= self.num_iter", name, self.num_iter)
-                self.param_infos[name].grad_ready_iter = self.num_iter
-
                 self._do_grad_reduce(name, p, i)
 
         return hook
 
-    def _grad_is_ready(self, grad_queue, index):
-        if index >= len(grad_queue):
-            return False
-        name = grad_queue[index]
-        return self.param_infos[name].grad_ready_iter >= self.num_iter
-
     def _reset_iter(self):
         self.num_iter += 1
-        self.current_reduce_idx = 0
 
     def reduce_gradients(self):
         """ average gradients """
@@ -151,17 +140,14 @@ class SdxDdp(torch.nn.Module):
         if dist.get_world_size(self.group) <= 1:
             return
 
-        import pdb;pdb.set_trace()
         if self.sync:
             for i, (name, param) in enumerate(self.module.named_parameters()):
                 if name not in self.parameters_to_ignore and param.requires_grad and param.grad is not None:
-                    if get_group_size(self._get_group(name, param)) <= 1:
+                    if dist.get_world_size(self._get_group(name, param)) <= 1:
                         continue
                     self._do_grad_reduce(name, param, i)
         else:
-            beg = time.time()
             torch.cuda.synchronize()
-            print(f"ddp done grad sync in {time.time()-beg} s")
 
         self._reset_iter()
 
@@ -178,7 +164,6 @@ class ParamInfo(object):
         self.param = param
         self.index = index
         self.group = group
-        self.grad_ready_iter = -1
 
     def get_info(self):
         return (self.name, self.param, self.index)
