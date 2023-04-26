@@ -1,3 +1,9 @@
+# TorchDistPackage
+
+TorchDistPackage provides some easy-to-use modules and tools for Distributed Training in PyTorch.
+
+It is under construction. Welcome to use and contribute.
+
 # Simple DDP Module in PyTorch
 
 code and example: [NaiveDdp](./ddp)
