@@ -7,11 +7,11 @@ import torch.distributed as dist
 from torch.distributed import ReduceOp
 
 
-__all__ = ['SdxDdp']
+__all__ = ['NaiveDdp']
 
 
-class SdxDdp(torch.nn.Module):
-    r""" SdxDdp wraps torch.nn.Module with distribued data parallel support
+class NaiveDdp(torch.nn.Module):
+    r""" NaiveDdp wraps torch.nn.Module with distribued data parallel support
 
     Args:
         module (torch.nn.Module, required):
@@ -27,7 +27,7 @@ class SdxDdp(torch.nn.Module):
                  params_to_group=None,
                  dp_rank0=0,
                  reduce_op="avg"):
-        super(SdxDdp, self).__init__()
+        super(NaiveDdp, self).__init__()
         self.module = module
 
         if hasattr(module, "_ddp_params_and_buffers_to_ignore"):

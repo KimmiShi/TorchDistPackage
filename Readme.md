@@ -1,8 +1,13 @@
 # Simple DDP Module in PyTorch
 
-## Hilights
+code and example: [NaiveDdp](./ddp)
 
-1. Support broadcast initial weights from a give rank when using Model Parallelism.
-2. Easy to understand
+Highlights:
 
+- Easy to understand and debug, no c++ api used.
+- overlaps grad reduce with compute like torch ddp
+
+# Toolkit
+
+- [slurm init](./slurm_dist_init/)
 

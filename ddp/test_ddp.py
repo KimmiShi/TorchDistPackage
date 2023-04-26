@@ -24,8 +24,8 @@ torch.cuda.set_device(device)
 model = MyModule().cuda()
 model2 = copy.deepcopy(model)
 
-from mydist import SdxDdp
-my_ddp_model = SdxDdp(model,
+from mydist import NaiveDdp
+my_ddp_model = NaiveDdp(model,
                 sync=False,
                 gradient_as_bucket_view=True,
 )
