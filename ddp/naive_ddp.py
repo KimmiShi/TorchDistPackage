@@ -53,6 +53,9 @@ class SdxDdp(torch.nn.Module):
         self.param_infos = {}
         self.lock = Lock()
 
+        self.reduce_time = 0.0
+        self.verbose = False
+
         self.reduce_stream = torch.cuda.Stream()
         if not sync and dist.get_world_size(self.group) > 1:
             self._grad_accs = []
@@ -76,10 +79,21 @@ class SdxDdp(torch.nn.Module):
     def _get_group(self, name, param):
         return self.group
 
+    def sync_comm(self):
+        beg = time.perf_counter()
+        self.reduce_stream.synchronize()
+
+        self.reduce_time += time.perf_counter()-beg
+
+
     def _reduce_grads(self, grad, group):
         if self.sync:
             dist.all_reduce(grad, group=group, op=self.reduce_op)
         else:
+            # this is important, the grad to reduce has to be ready?
+            stream = self.reduce_stream
+            stream.wait_stream(torch.cuda.current_stream())
+
             with torch.cuda.stream(self.reduce_stream):
                 try:
                     dist.all_reduce(grad, group=self.group, async_op=False, op=self.reduce_op)
@@ -114,7 +128,7 @@ class SdxDdp(torch.nn.Module):
                 # we should remove the full buckets from self to make sure that bucket is not resued?
                 #       not needed, since the bucket will be full, and will be replaced by next new bucket
 
-            else:   # if param already has a 'bucket', mark current bucket is ready, and if bucket is ready, reduce the bucket
+            else:   # if param already has a 'bucket', mark current param ready, and if bucket is ready, reduce the bucket
                 bucket = p.grad_bucket
                 if bucket.grad_ready():
                     self._reduce_grads(bucket.data, bucket.group)
@@ -122,32 +136,44 @@ class SdxDdp(torch.nn.Module):
         else:
             self._reduce_grads(p.grad.data, self._get_group(name, p))
 
+
     def _make_hook(self, name, p, i):
         def hook(*ignore):
             # make grad thread safe
             with self.lock:
+
                 self._do_grad_reduce(name, p, i)
 
         return hook
 
+
     def _reset_iter(self):
+        if self.verbose and dist.get_rank(self.group) == 0:
+            print("rank:", dist.get_rank() ," Total Reduce of last iter: ", self.reduce_time)
         self.num_iter += 1
+        self.reduce_time = 0.0
 
     def reduce_gradients(self):
-        """ average gradients """
+        """ call this after a iter, to reudce grads and sync """
 
         # no need sync when not distributed
         if dist.get_world_size(self.group) <= 1:
             return
+
+        beg = time.perf_counter()
 
         if self.sync:
             for i, (name, param) in enumerate(self.module.named_parameters()):
                 if name not in self.parameters_to_ignore and param.requires_grad and param.grad is not None:
                     if dist.get_world_size(self._get_group(name, param)) <= 1:
                         continue
+                    if param.grad is None:
+                        import pdb;pdb.set_trace()
+                        print(name, " grad is none")
                     self._do_grad_reduce(name, param, i)
-        else:
-            torch.cuda.synchronize()
+
+        torch.cuda.synchronize()
+        self.reduce_time += time.perf_counter()-beg
 
         self._reset_iter()
 
