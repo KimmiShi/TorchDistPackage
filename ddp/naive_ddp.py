@@ -7,11 +7,11 @@ import torch.distributed as dist
 from torch.distributed import ReduceOp
 
 
-__all__ = ['NaiveDdp']
+__all__ = ['NaiveDDP']
 
 
-class NaiveDdp(torch.nn.Module):
-    r""" NaiveDdp wraps torch.nn.Module with distribued data parallel support
+class NaiveDDP(torch.nn.Module):
+    r""" NaiveDDP wraps torch.nn.Module with distribued data parallel support
 
     Args:
         module (torch.nn.Module, required):
@@ -26,8 +26,9 @@ class NaiveDdp(torch.nn.Module):
                  process_group=None,
                  params_to_group=None,
                  dp_rank0=0,
-                 reduce_op="avg"):
-        super(NaiveDdp, self).__init__()
+                 reduce_op="avg",
+                 **kwargs):
+        super(NaiveDDP, self).__init__()
         self.module = module
 
         if hasattr(module, "_ddp_params_and_buffers_to_ignore"):
@@ -39,6 +40,9 @@ class NaiveDdp(torch.nn.Module):
         self.dp_rank0 = dp_rank0
         self.params_to_group = params_to_group or {}
         self.reduce_op = ReduceOp.SUM if reduce_op.lower == 'sum' else ReduceOp.AVG
+
+        # Holds all_reduce handles, used when async_reduction is True
+        # self.async_handles = set()
 
         self.broadcast_params()
 
@@ -54,7 +58,12 @@ class NaiveDdp(torch.nn.Module):
         self.lock = Lock()
 
         self.reduce_time = 0.0
-        self.verbose = False
+        self.hook_time = 0.0
+        self.verbose = kwargs.get('verbose', False)
+
+        self.num_grad_acc_iter = kwargs.get('num_grad_acc_iter', 1)
+        self.grad_reduce_cnts = {}
+        # Note: for bucket, a warmup iter is needed to build up bucket, and correctly reduce grads
 
         self.reduce_stream = torch.cuda.Stream()
         if not sync and dist.get_world_size(self.group) > 1:
@@ -86,14 +95,20 @@ class NaiveDdp(torch.nn.Module):
         self.reduce_time += time.perf_counter()-beg
 
 
-    def _reduce_grads(self, grad, group):
+    def _reduce_grads(self, grad, group, name):
         if self.sync:
             dist.all_reduce(grad, group=group, op=self.reduce_op)
         else:
-            # this is important, the grad to reduce has to be ready?
+            if self.grad_reduce_cnts.get(name, 0) < self.num_grad_acc_iter - 1:
+                self.grad_reduce_cnts[name] = self.grad_reduce_cnts.get(name, 0) + 1
+                return
+            # beg = time.perf_counter()
             stream = self.reduce_stream
             stream.wait_stream(torch.cuda.current_stream())
+            # self.reduce_time += time.perf_counter()-beg
 
+            # handle = dist.all_reduce(grad, group=self.group, async_op=True, op=self.reduce_op)
+            # self.async_handles.add(handle)
             with torch.cuda.stream(self.reduce_stream):
                 try:
                     dist.all_reduce(grad, group=self.group, async_op=False, op=self.reduce_op)
@@ -101,7 +116,7 @@ class NaiveDdp(torch.nn.Module):
                     import pdb;pdb.set_trace()
                     print("Exception at _reduce_grads")
 
-    def _do_grad_reduce(self, name, p, idx):
+    def _do_grad_reduce(self, name, p, idx=None):
         should_bucket = lambda grad: grad.element_size() * grad.numel() < self.bucket_cap_bytes * 4 // 5
         if self.gradient_as_bucket_view and should_bucket(p.grad):
             # if param has no "bucket", assign a 'bucket' to this param
@@ -123,7 +138,7 @@ class NaiveDdp(torch.nn.Module):
                 p.grad_bucket = bucket
 
                 # launch a reduce every time a new tensor comes
-                self._reduce_grads(p.grad.data, self._get_group(name, p))
+                self._reduce_grads(p.grad.data, self._get_group(name, p), "bucket_warmup")
 
                 # we should remove the full buckets from self to make sure that bucket is not resued?
                 #       not needed, since the bucket will be full, and will be replaced by next new bucket
@@ -131,18 +146,18 @@ class NaiveDdp(torch.nn.Module):
             else:   # if param already has a 'bucket', mark current param ready, and if bucket is ready, reduce the bucket
                 bucket = p.grad_bucket
                 if bucket.grad_ready():
-                    self._reduce_grads(bucket.data, bucket.group)
+                    self._reduce_grads(bucket.data, bucket.group, bucket.name)
                     bucket.grad_reset()
         else:
-            self._reduce_grads(p.grad.data, self._get_group(name, p))
+            self._reduce_grads(p.grad.data, self._get_group(name, p), name)
 
 
     def _make_hook(self, name, p, i):
         def hook(*ignore):
             # make grad thread safe
-            with self.lock:
+            # with self.lock:
 
-                self._do_grad_reduce(name, p, i)
+            self._do_grad_reduce(name, p, i)
 
         return hook
 
@@ -152,6 +167,10 @@ class NaiveDdp(torch.nn.Module):
             print("rank:", dist.get_rank() ," Total Reduce of last iter: ", self.reduce_time)
         self.num_iter += 1
         self.reduce_time = 0.0
+
+        # clear grad reduce cnt every iter
+        for key in self.grad_reduce_cnts:
+            self.grad_reduce_cnts[key] = 0
 
     def reduce_gradients(self):
         """ call this after a iter, to reudce grads and sync """
@@ -171,6 +190,10 @@ class NaiveDdp(torch.nn.Module):
                         import pdb;pdb.set_trace()
                         print(name, " grad is none")
                     self._do_grad_reduce(name, param, i)
+        # else:
+        #     for handle in self.async_handles:
+        #         handle.wait()
+        #     self.async_handles.clear()
 
         torch.cuda.synchronize()
         self.reduce_time += time.perf_counter()-beg
