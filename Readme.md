@@ -24,12 +24,18 @@ code and example: [NaiveDdp](./ddp)
 ## 1. [torch dist init from slurm](./slurm_dist_init/)
 
 ## 2. Flexible process group initialize for Mixed Parallelism
-[topo.py](./dist_init/topo.py) supports flexible combination of process group topology.
 
-| "inside" mean the ranks in this group are more likely to be adjacent
+**References**:
+- https://www.deepspeed.ai/
 
-| and "outside" means the ranks in this group are more likely to be at different GPU nodes.
+
+**Highlights:**
 
 Generally, DataParallel Group placement is at the most 'outside', and ModelParallel group is located 'inside'.
 
 However, in some cases, we would like the DataParallel Group to be placed 'inside'. [topo.py](./dist_init/topo.py) enables us to place DP,TP,PP groups in the order we want it to be.
+
+> "inside" mean the ranks in this group are more likely to be adjacent
+>
+> "outside" means the ranks in this group are more likely to be at different GPU nodes.
+
