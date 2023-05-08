@@ -1,7 +1,8 @@
 import os
 import subprocess
 
-import torch.distribued as dist
+import torch
+import torch.distributed as dist
 
 # TODO: this func is not exmamined
 def find_free_port():

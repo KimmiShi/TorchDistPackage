@@ -81,7 +81,7 @@ class ProcessTopology(metaclass=SingletonMeta):
                 # setup
                 dist_init_slurm()
                 dist_config = [('data',world_size/(2*pp_size)), ('pipe',pp_size), ('tensor',2)]
-                global_context.setup_process_groups(dist_config)
+                torch_parallel_context.setup_process_groups(dist_config)
                 # api example
                 test_comm()
 
@@ -211,10 +211,10 @@ class ProcessTopology(metaclass=SingletonMeta):
             return  False
 
 
-global_context = ProcessTopology()
+torch_parallel_context = ProcessTopology()
 
 def is_using_pp():
-    return global_context.is_mode_inited('pipe')
+    return torch_parallel_context.is_mode_inited('pipe')
 
 def test_comm():
     import torch
@@ -222,29 +222,29 @@ def test_comm():
     torch.cuda.synchronize()
     dist.all_reduce(tmp, group=None)
     for mode in ['data', 'tensor', 'pipe', 'model']:
-        if global_context.is_mode_inited(mode):
-            dist.all_reduce(tmp, group=global_context.get_group(mode))
+        if torch_parallel_context.is_mode_inited(mode):
+            dist.all_reduce(tmp, group=torch_parallel_context.get_group(mode))
             torch.cuda.synchronize()
 
     len_dl_tensor = torch.tensor([0], dtype=torch.long).cuda()
-    if global_context.is_first_in_group('model'):
+    if torch_parallel_context.is_first_in_group('model'):
         len_dl = 10
         len_dl_tensor = torch.tensor([len_dl], dtype=torch.long).cuda()
 
     dist.broadcast(len_dl_tensor,0)
 
-    dist.broadcast(len_dl_tensor, global_context.get_ranks_in_group('model')[0], global_context.get_group('model'))
+    dist.broadcast(len_dl_tensor, torch_parallel_context.get_ranks_in_group('model')[0], torch_parallel_context.get_group('model'))
     torch.cuda.synchronize()
 
-    outs = [torch.rand_like(tmp) for _ in range(global_context.get_group_size('tensor'))]
-    dist.all_gather(outs, tmp, group=global_context.get_group('tensor'))
+    outs = [torch.rand_like(tmp) for _ in range(torch_parallel_context.get_group_size('tensor'))]
+    dist.all_gather(outs, tmp, group=torch_parallel_context.get_group('tensor'))
     torch.cuda.synchronize()
 
 
-    if global_context.is_first_in_pipeline_group():
-        dist.send(tmp, global_context.get_next_global_rank('pipe'))
-    if global_context.is_last_in_pipeline_group():
-        dist.recv(tmp, global_context.get_prev_global_rank('pipe'))
+    if torch_parallel_context.is_first_in_pipeline_group():
+        dist.send(tmp, torch_parallel_context.get_next_global_rank('pipe'))
+    if torch_parallel_context.is_last_in_pipeline_group():
+        dist.recv(tmp, torch_parallel_context.get_prev_global_rank('pipe'))
     torch.cuda.synchronize()
     dist.barrier()
     print("Finished test_comm --- ")
