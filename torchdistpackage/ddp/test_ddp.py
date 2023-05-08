@@ -1,7 +1,7 @@
 import copy
 import torch
 import torch.nn as nn
-from core.distributed_utils import dist_init_slurm,init_comm_groups,init_link_dp
+from core.distributed_utils import dist_init_slurm, init_comm_groups, init_link_dp
 import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
 
@@ -16,6 +16,7 @@ class MyModule(nn.Module):
         out = self.fc1(input)
         return self.fc2(out)
 
+
 dist_init_slurm()
 rank = dist.get_rank()
 device = rank % torch.cuda.device_count()
@@ -25,10 +26,8 @@ model = MyModule().cuda()
 model2 = copy.deepcopy(model)
 
 from mydist import NaiveDdp
-my_ddp_model = NaiveDdp(model,
-                sync=False,
-                gradient_as_bucket_view=True,
-)
+
+my_ddp_model = NaiveDdp(model, sync=False, gradient_as_bucket_view=True)
 torch_ddp_model = DDP(model2)
 
 for _ in range(3):
@@ -37,13 +36,12 @@ for _ in range(3):
         if p1.data.ne(p2.data).sum() > 0:
             assert False, "model param not equal"
 
-
-    x = torch.rand(3,10).cuda() + rank
+    x = torch.rand(3, 10).cuda() + rank
     out = my_ddp_model(x)
     out.sum().backward()
     my_ddp_model.reduce_gradients()
 
-    out2=torch_ddp_model(x)
+    out2 = torch_ddp_model(x)
     out2.sum().backward()
 
     assert torch.allclose(out2, out)
@@ -51,12 +49,13 @@ for _ in range(3):
     # compare grads
     for p1, p2 in zip(my_ddp_model.parameters(), torch_ddp_model.parameters()):
         if p1.grad.ne(p2.grad).sum() > 0:
-            import pdb;pdb.set_trace()
+            import pdb
+
+            pdb.set_trace()
             if not torch.allclose(p1.grad, p2.grad):
                 assert False
 
-
     my_ddp_model.zero_grad()
     torch_ddp_model.zero_grad()
-    if rank==0:
+    if rank == 0:
         print("passed round -- ")
