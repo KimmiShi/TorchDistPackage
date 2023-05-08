@@ -1,307 +1,132 @@
-import os
-import torch
-import collections
-from easydict import EasyDict as edict
-import spring.linklink as link
-from torch.nn import Module
-from torch.utils.data.sampler import Sampler
+from functools import partial
+
+import numpy
 import torch.distributed as dist
-import math
-import numpy as np
-import multiprocessing as mp
 
-from collections import namedtuple
-from itertools import product as cartesian_product
-
-from core.utils import named_buffers, sync_print
-from enum import Enum
-from typing import Union, List, Tuple
-
-from slurm_dist_init.launch_from_slurm import setup_distributed_slurm
-
-_GLOBAL_TOPO = None
-_DP_GROUP = None
-_TP_GROUP = None
-_PP_GROUP = None
-_MP_GROUP = None
-
-class ProcessTopology:
-    """ Manages the mapping of n-dimensional Cartesian coordinates to linear
-    indices. This mapping is used to map the rank of processes to the grid
-    for various forms of parallelism.
-
-    Each axis of the tensor is accessed by its name. The provided ordering
-    of the axes defines the layout of the topology. ProcessTopology uses a "row-major"
-    layout of the tensor axes, and so axes=['x', 'y'] would map coordinates (x,y) and
-    (x,y+1) to adjacent linear indices. If instead axes=['y', 'x'] was used, coordinates
-    (x,y) and (x+1,y) would be adjacent.
-
-    Some methods return ProcessCoord namedtuples.
+class SingletonMeta(type):
     """
-    def __init__(self, axes, dims):
-        """Create a mapping of n-dimensional tensor coordinates to linear indices.
+    Adapted from colossalai.p2p.
 
-        Arguments:
-            axes (list): the names of the tensor axes
-            dims (list): the dimension (length) of each axis of the topology tensor
+    The Singleton class can be implemented in different ways in Python. Some
+    possible methods include: base class, decorator, metaclass. We will use the
+    metaclass because it is best suited for this purpose.
+    """
+
+    _instances = {}
+
+    def __call__(cls, *args, **kwargs):
         """
-
-        self.axes = axes  # names of each topology axis
-        self.dims = dims  # length of each topology axis
-
-
-        # This is actually a class that lets us hash {'row':3, 'col':2} mappings
-        self.ProcessCoord = namedtuple('ProcessCoord', axes)
-
-        self.mapping = {}
-
-        ranges = [range(d) for d in dims]
-        # example: 1, (0,0,1)
-        for global_rank, coord in enumerate(cartesian_product(*ranges)):
-            key = {axis: coord[self.axes.index(axis)] for axis in self.axes}
-            key = self.ProcessCoord(**key)
-            # for example, {ProcessCoord(row=0, col=1) : 1}
-            self.mapping[key] = global_rank
-
-    def get_rank(self, **coord_kwargs):
-        """Return the global rank of a process via its coordinates.
-
-        Coordinates are specified as kwargs. For example:
-
-            >>> X = ProcessTopology(axes=['x', 'y'], dims=[2,3])
-            >>> X.get_rank(x=0, y=1)
-            1
+        Possible changes to the value of the `__init__` argument do not affect
+        the returned instance.
         """
-        if len(coord_kwargs) != len(self.axes):
-            raise ValueError('get_rank() does not support slices. Use filter_match())')
+        if cls not in cls._instances:
+            instance = super().__call__(*args, **kwargs)
+            cls._instances[cls] = instance
+        else:
+            assert len(args) == 0 and len(
+                kwargs) == 0, f'{cls.__name__} is a singleton class and a instance has been created.'
+        return cls._instances[cls]
 
-        key = self.ProcessCoord(**coord_kwargs)
-        assert key in self.mapping, f'key {coord_kwargs} invalid'
-        return self.mapping[key]
+def gen_inner_ranks(world_size, group_size):
+    num_groups = int(world_size//group_size)
+    return [list(range(g*group_size, (g+1)*group_size)) for g in range(num_groups)]
 
-    def get_axis_names(self):
-        """Return a list of the axis names in the ordering of the topology. """
-        return self.axes
+def gen_groups(world_size, group_size, strides, hook):
+    group_size = int(group_size)
+    num_groups = int(world_size//group_size)
+    if strides is None or len(strides)==0:
+        # most inner
+        list_of_ranks = gen_inner_ranks(world_size, group_size)
+        # print(list_of_ranks)
+        for ranks in list_of_ranks:
+            hook(ranks)
+    else:
+        inner_group_size = numpy.prod(strides)
+        list_of_inner_ranks = gen_inner_ranks(world_size, inner_group_size)
+        # print(list_of_inner_ranks)
 
-    def get_rank_repr(self,
-                      rank,
-                      omit_axes=['data',
-                                 'pipe'],
-                      inner_sep='_',
-                      outer_sep='-'):
-        """Return a string representation of a rank.
+        for ind in range(inner_group_size):
+            chunks = [list_of_inner_ranks[x:x+group_size] for x in range(0, len(list_of_inner_ranks), group_size)]
+            # print(chunks)
+            for chunk in chunks:
+                cur_ranks = [ranks[ind] for ranks in chunk]
+                hook(cur_ranks)
 
-        This method is primarily used for checkpointing model data.
+class ProcessTopology(metaclass=SingletonMeta):
+    def __init__(self):
+        self._groups = dict()
+        self._ranks_in_group = dict()
+        self._dp_ranks_all = []
 
-        For example:
-            >>> topo = Topo(axes=['a', 'b'], dims=[2, 2])
-            >>> topo.get_rank_repr(rank=3)
-            'a_01-b_01'
-            >>> topo.get_rank_repr(rank=3, omit_axes=['a'])
-            'b_01'
-
-        Args:
-            rank (int): A rank in the topology.
-            omit_axes (list, optional): Axes that should not be in the representation. Defaults to ['data', 'pipe'].
-            inner_sep (str, optional): [description]. Defaults to '_'.
-            outer_sep (str, optional): [description]. Defaults to '-'.
-
-        Returns:
-            str: A string representation of the coordinate owned by ``rank``.
+    def setup_process_groups(self, config:list):
         """
-        omit_axes = frozenset(omit_axes)
-        axes = [a for a in self.get_axis_names() if a not in omit_axes]
-        names = []
-        for ax in axes:
-            ax_rank = getattr(self.get_coord(rank=rank), ax)
-            names.append(f'{ax}{inner_sep}{ax_rank:02d}')
-        return outer_sep.join(names)
+            Example: setup_process_groups([('data',4), ('pipe',2), ('tensor',2)])   # world_size=16
 
-    def get_dim(self, axis):
-        """Return the number of processes along the given axis.
+            Result:
+                tensor parallel groups:
+                    [[0, 1], [2, 3], [4, 5], [6, 7], [8, 9], [10, 11], [12, 13], [14, 15]]
+                pipeline parallel groups:
+                    [0, 2]
+                    [4, 6]
+                    [8, 10]
+                    [12, 14]
+                    [1, 3]
+                    [5, 7]
+                    [9, 11]
+                    [13, 15]
+                data parallel groups:
+                    [0, 4, 8, 12]
+                    [1, 5, 9, 13]
+                    [2, 6, 10, 14]
+                    [3, 7, 11, 15]
+            Usage:
+                # setup
+                dist_init_slurm()
+                dist_config = [('data',world_size/(2*pp_size)), ('pipe',pp_size), ('tensor',2)]
+                global_context.setup_process_groups(dist_config)
+                # api example
+                test_comm()
 
-        For example:
-            >>> X = ProcessTopology(axes=['x', 'y'], dims=[2,3])
-            >>> X.get_dim('y')
-            3
         """
-        if axis not in self.axes:
-            return 0
-        return self.dims[self.axes.index(axis)]
+        def build_group(type, ranks):
+            if type == 'data':
+                self._dp_ranks_all.append(ranks)
+            from datetime import timedelta
+            grp = dist.new_group(ranks, timeout=timedelta(seconds=100))
+            if dist.get_rank() in ranks:
+                self._groups[type] = grp
+                self._ranks_in_group[type] = ranks
 
-    def get_coord(self, rank):
-        """Return the coordinate owned by a process rank.
+                if dist.get_rank() == ranks[0]:
+                    print(f"group {type}, ranks: {ranks}")
 
-        The axes of the returned namedtuple can be directly accessed as members. For
-        example:
-            >>> X = ProcessTopology(axes=['x', 'y'], dims=[2,3])
-            >>> coord = X.get_coord(rank=1)
-            >>> coord.x
-            0
-            >>> coord.y
-            1
-        """
-        for coord, idx in self.mapping.items():
-            if idx == rank:
-                return coord
-        raise ValueError(f'rank {rank} not found in topology.')
-
-    def get_axis_comm_lists(self, axis):
-        """ Construct lists suitable for a communicator group along axis ``axis``.
-
-        Example:
-            >>> topo = Topo(axes=['pipe', 'data', 'model'], dims=[2, 2, 2])
-            >>> topo.get_axis_comm_lists('pipe')
-            [
-                [0, 4], # data=0, model=0
-                [1, 5], # data=0, model=1
-                [2, 6], # data=1, model=0
-                [3, 7], # data=1, model=1
-            ]
-
-        Returns:
-            A list of lists whose coordinates match in all axes *except* ``axis``.
-        """
-
-        # We don't want to RuntimeError because it allows us to write more generalized
-        # code for hybrid parallelisms.
-        if axis not in self.axes:
-            return []
-
-        # Grab all axes but `axis`
-        other_axes = [a for a in self.axes if a != axis]
-
-        lists = []
-
-        # Construct all combinations of coords with other_axes
-        ranges = [range(self.get_dim(a)) for a in other_axes]
-        for coord in cartesian_product(*ranges):
-            other_keys = {a: coord[other_axes.index(a)] for a in other_axes}
-            # now go over all ranks in `axis`.
-            sub_list = []
-            for axis_key in range(self.get_dim(axis)):
-                key = self.ProcessCoord(**other_keys, **{axis: axis_key})
-                sub_list.append(self.mapping[key])
-            lists.append(sub_list)
-
-        return lists
-
-    def filter_match(self, **filter_kwargs):
-        """Return the list of ranks whose coordinates match the provided criteria.
-
-        Example:
-            >>> X = ProcessTopology(axes=['pipe', 'data', 'model'], dims=[2, 2, 2])
-            >>> X.filter_match(pipe=0, data=1)
-            [2, 3]
-            >>> [X.get_coord(rank) for rank in X.filter_match(pipe=0, data=1)]
-            [ProcessCoord(pipe=0, data=1, model=0), ProcessCoord(pipe=0, data=1, model=1)]
-
-        Arguments:
-            **filter_kwargs (dict): criteria used to select coordinates.
-
-        Returns:
-            The list of ranks whose coordinates match filter_kwargs.
-        """
-        def _filter_helper(x):
-            for key, val in filter_kwargs.items():
-                if getattr(x, key) != val:
-                    return False
-            return True
-
-        coords = filter(_filter_helper, self.mapping.keys())
-        return [self.mapping[coord] for coord in coords]
-
-    def get_axis_list(self, axis, idx):
-        """Returns the list of global ranks whose coordinate in an axis is idx.
-
-        For example:
-            >>> X = ProcessTopology(axes=['x', 'y'], dims=[2,3])
-            >>> X.get_axis_list(axis='x', idx=0)
-            [0, 1, 2]
-            >>> X.get_axis_list(axis='y', idx=0)
-            [0, 3]
-        """
-
-        # This could be faster by generating the desired keys directly instead of
-        # filtering.
-        axis_num = self.axes.index(axis)
-        ranks = [self.mapping[k] for k in self.mapping.keys() if k[axis_num] == idx]
-        return ranks
-
-    def world_size(self):
-        return len(self.mapping)
-
-    def __str__(self):
-        return str(self.mapping)
-
-    @classmethod
-    def get_topo(cls, axes=None, dims=None):
-        global _GLOBAL_TOPO
-        if _GLOBAL_TOPO is None:
-            _GLOBAL_TOPO = cls(axes, dims)
-        return _GLOBAL_TOPO
+        dims = [item[0] for item in config]
+        sizes = [int(item[1]) for item in config]
 
 
-    def get_global_rank(self):
-        return dist.get_rank()
+        for (dim, size) in config:
+            cur_dim_ind = dims.index(dim)
+            strides=sizes[cur_dim_ind+1:] if cur_dim_ind+1 < len(sizes) else []
 
+            gen_groups(dist.get_world_size(), size, strides, partial(build_group, dim))
 
-    def create_group(self, type_name):
-        assert type_name in self.axes
+        # build Model Parallel Group Automatically
+        if "tensor" in dims or "pipe" in dims:
 
-        if type_name == 'data':
-            global _DP_GROUP
-            comm_lists = self.get_topo().get_axis_comm_lists(type_name)
-            rank = self.get_global_rank()
-            for l in comm_lists:
-                if rank in l:
-                    _DP_GROUP = torch.distributed.new_group(l)
+            for g in range(len(self._dp_ranks_all[0])):
+                model_ranks = [dp_ranks[g] for dp_ranks in self._dp_ranks_all]
+                build_group("model", model_ranks)
 
-        if type_name == 'tensor':
-            global _TP_GROUP
-            comm_lists = self.get_topo().get_axis_comm_lists(type_name)
-            rank = self.get_global_rank()
-            for l in comm_lists:
-                if rank in l:
-                    _TP_GROUP = torch.distributed.new_group(l)
+    def get_group(self, type_name):
+        return self._groups[type_name]
 
-        if type_name == 'pipe':
-            global _PP_GROUP
-            comm_lists = self.get_topo().get_axis_comm_lists(type_name)
-            rank = self.get_global_rank()
-            for l in comm_lists:
-                if rank in l:
-                    _PP_GROUP = torch.distributed.new_group(l)
-
-        if type_name == 'model':
-            global _MP_GROUP
-            comm_lists = self.get_topo().get_axis_comm_lists(type_name)
-            rank = self.get_global_rank()
-            for l in comm_lists:
-                if rank in l:
-                    _MP_GROUP = torch.distributed.new_group(l)
 
     def get_group_rank(self, type_name):
-        assert type_name in self.axes
-        if type_name in ['tensor', 'pipe', 'model']:
-            comm_lists = self.get_topo().get_axis_comm_lists(type_name)
-        else:
-            comm_lists = self.get_topo().get_axis_comm_lists(type_name)
-        rank = self.get_global_rank()
-        for l in comm_lists:
-            if rank in l:
-                return l.index(rank)
+        return dist.get_rank(group=self._groups[type_name])
 
-    def get_group_ranks(self, type_name):
-        assert type_name in self.axes
-        if type_name in ['tensor', 'pipe', 'model']:
-            comm_lists = self.get_topo().get_axis_comm_lists(type_name)
-        else:
-            comm_lists = self.get_topo().get_axis_comm_lists(type_name)
-        rank = self.get_global_rank()
-        for l in comm_lists:
-            if rank in l:
-                return l
+
+    def get_ranks_in_group(self, type_name):
+        return self._ranks_in_group[type_name]
 
     def get_tp_rank(self):
         return self.get_group_rank('tensor')
@@ -316,12 +141,7 @@ class ProcessTopology:
         return self.get_group_rank('model')
 
     def get_group_size(self, type_name):
-        assert type_name in self.axes
-        comm_lists = self.get_topo().get_axis_comm_lists(type_name)
-        rank = self.get_global_rank()
-        for l in comm_lists:
-            if rank in l:
-                return len(l)
+        return len(self._ranks_in_group[type_name])
 
     def get_tp_size(self):
         return self.get_group_size('tensor')
@@ -336,26 +156,10 @@ class ProcessTopology:
         return self.get_group_size('model')
 
     def is_first_in_group(self, type_name):
-        assert type_name in self.axes
-        comm_lists = self.get_topo().get_axis_comm_lists(type_name)
-        rank = self.get_global_rank()
-        for l in comm_lists:
-            if rank in l:
-                if rank == l[0]:
-                    return True
-                break
-        return False
+        return self.get_group_rank(type_name) == 0
 
     def is_last_in_group(self, type_name):
-        assert type_name in self.axes
-        comm_lists = self.get_topo().get_axis_comm_lists(type_name)
-        rank = self.get_global_rank()
-        for l in comm_lists:
-            if rank in l:
-                if rank == l[-1]:
-                    return True
-                break
-        return False
+        return dist.get_rank() == self._ranks_in_group[type_name][-1]
 
     def is_first_in_tensor_group(self):
         return self.is_first_in_group('tensor')
@@ -382,39 +186,59 @@ class ProcessTopology:
         return self.is_last_in_group('model')
 
     def get_prev_global_rank(self, type_name = 'pipe'):
-        assert type_name in self.axes
-        ranks = self.get_group_ranks(type_name)
-        rank = self.get_group_rank(type_name)
-        idx = ranks.index(rank) - 1
+        local_rank = self.get_group_rank(type_name)
+        world_size = self.get_group_size(type_name)
+        ranks_in_group = self.get_ranks_in_group(type_name)
+
+        return ranks_in_group[(local_rank - 1) % world_size]
 
     def get_next_global_rank(self, type_name = 'pipe'):
-        assert type_name in self.axes
-        ranks = self.get_group_ranks(type_name)
-        rank = self.get_group_rank(type_name)
-        idx = ranks.index(rank) + 1
+        local_rank = self.get_group_rank(type_name)
+        world_size = self.get_group_size(type_name)
+        ranks_in_group = self.get_ranks_in_group(type_name)
 
-def launch_from_slurm(config):
-    """
-    Usage:
-        CONFIG = { 'TOPO' : [
-            'data': {'SIZE': 4},
-            'pipe': {'SIZE': 2},
-            ]
-        }
-        launch_from_slurm(CONFIG)
-    """
-    setup_distributed_slurm()
-    axes = []
-    dims = []
-    for idx, item in enumerate(config['TOPO']):
-        axes.append(item["TYPE"])
-        dims.append(int(item["SIZE"]))
-    topo = ProcessTopology.get_topo(axes, dims)
-    assert dist.is_initialized()
-    for axe in axes:
-        topo.create_group(axe)
+        return ranks_in_group[(local_rank + 1) % world_size]
+
+    def is_mode_inited(self, type_name):
+        return type_name in self._groups and self.get_group_size(type_name)>1
+
+    def all_dp_ranks(self):
+        return self._dp_ranks_all
+
+global_context = ProcessTopology()
+
+def is_using_pp():
+    return global_context.is_mode_inited('pipe')
+
+def test_comm():
+    import torch
+    tmp = torch.rand([100,1024]).cuda()
+    torch.cuda.synchronize()
+    dist.all_reduce(tmp, group=None)
+    for mode in ['data', 'tensor', 'pipe', 'model']:
+        if global_context.is_mode_inited(mode):
+            dist.all_reduce(tmp, group=global_context.get_group(mode))
+            torch.cuda.synchronize()
+
+    len_dl_tensor = torch.tensor([0], dtype=torch.long).cuda()
+    if global_context.is_first_in_group('model'):
+        len_dl = 10
+        len_dl_tensor = torch.tensor([len_dl], dtype=torch.long).cuda()
+
+    dist.broadcast(len_dl_tensor,0)
+
+    dist.broadcast(len_dl_tensor, global_context.get_ranks_in_group('model')[0], global_context.get_group('model'))
+    torch.cuda.synchronize()
+
+    outs = [torch.rand_like(tmp) for _ in range(global_context.get_group_size('tensor'))]
+    dist.all_gather(outs, tmp, group=global_context.get_group('tensor'))
+    torch.cuda.synchronize()
 
 
-def global_topo():
-    global _GLOBAL_TOPO
-    return _GLOBAL_TOPO
+    if global_context.is_first_in_pipeline_group():
+        dist.send(tmp, global_context.get_next_global_rank('pipe'))
+    if global_context.is_last_in_pipeline_group():
+        dist.recv(tmp, global_context.get_prev_global_rank('pipe'))
+    torch.cuda.synchronize()
+    dist.barrier()
+    print("Finished test_comm --- ")
