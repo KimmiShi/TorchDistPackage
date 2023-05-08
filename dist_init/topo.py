@@ -1,12 +1,10 @@
 from functools import partial
-
+from collections import defaultdict
 import numpy
 import torch.distributed as dist
 
 class SingletonMeta(type):
     """
-    Adapted from colossalai.p2p.
-
     The Singleton class can be implemented in different ways in Python. Some
     possible methods include: base class, decorator, metaclass. We will use the
     metaclass because it is best suited for this purpose.
@@ -56,7 +54,7 @@ class ProcessTopology(metaclass=SingletonMeta):
     def __init__(self):
         self._groups = dict()
         self._ranks_in_group = dict()
-        self._dp_ranks_all = []
+        self._ranks_all = defaultdict(list)
 
     def setup_process_groups(self, config:list):
         """
@@ -89,8 +87,7 @@ class ProcessTopology(metaclass=SingletonMeta):
 
         """
         def build_group(type, ranks):
-            if type == 'data':
-                self._dp_ranks_all.append(ranks)
+            self._ranks_all[type].append(ranks)
             from datetime import timedelta
             grp = dist.new_group(ranks, timeout=timedelta(seconds=100))
             if dist.get_rank() in ranks:
@@ -112,9 +109,8 @@ class ProcessTopology(metaclass=SingletonMeta):
 
         # build Model Parallel Group Automatically
         if "tensor" in dims or "pipe" in dims:
-
-            for g in range(len(self._dp_ranks_all[0])):
-                model_ranks = [dp_ranks[g] for dp_ranks in self._dp_ranks_all]
+            for g in range(len(self._ranks_all['data'][0])):
+                model_ranks = [dp_ranks[g] for dp_ranks in self._ranks_all['data']]
                 build_group("model", model_ranks)
 
     def get_group(self, type_name):
@@ -203,7 +199,17 @@ class ProcessTopology(metaclass=SingletonMeta):
         return type_name in self._groups and self.get_group_size(type_name)>1
 
     def all_dp_ranks(self):
-        return self._dp_ranks_all
+        return self._ranks_all['data']
+
+    def is_first_group(self, type_name):
+        # process group of 'type' may have several groups,
+        # sometime we only need process in the 'first' group to dp sth
+        group_ranks = self._ranks_in_group[type_name]
+        if group_ranks == self._ranks_all[type_name][0]:
+            return True
+        else:
+            return  False
+
 
 global_context = ProcessTopology()
 

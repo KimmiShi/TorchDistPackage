@@ -26,7 +26,7 @@ code and example: [NaiveDdp](./ddp)
 ## 2. Flexible process group initialize for Mixed Parallelism
 
 **References**:
-- https://www.deepspeed.ai/
+- https://github.com/hpcaitech/ColossalAI
 
 
 **Highlights:**
