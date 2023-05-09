@@ -1,3 +1,4 @@
+import torch
 from torchdistpackage import tpc
 
 def partition_uniform(flat_sequence, extra_len=0):

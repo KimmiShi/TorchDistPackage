@@ -6,7 +6,7 @@ It is under construction. Welcome to use and contribute.
 
 # Simple DDP Module in PyTorch
 
-code and example: [NaiveDdp](./ddp)
+code and example: [NaiveDdp](./torchdistpackage/ddp/naive_ddp.py)
 
 **Highlights:**
 
@@ -21,7 +21,7 @@ code and example: [NaiveDdp](./ddp)
 
 # Toolkit
 
-## 1. [torch dist init from slurm](./slurm_dist_init/)
+## 1. [torch dist init from slurm](./torchdistpackage/dist/launch_from_slurm.py)
 
 ## 2. Flexible process group initialization for Mixed Parallelism
 
@@ -50,7 +50,7 @@ However, in some cases, we would like the DataParallel Group to be placed 'insid
 # pp_size=2
 
     dist_config = [('pipe',pp_size), ('tensor',2), ('data',world_size/(2*pp_size))]
-    global_context.setup_process_groups(dist_config)
+    tpc.setup_process_groups(dist_config)
 ```
 
 output:
