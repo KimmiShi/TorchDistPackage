@@ -6,10 +6,44 @@ It is under construction. Welcome to use and contribute.
 
 [主要特性介绍-中文](./Intro.md)
 
+# 安装使用
+
+- install
+```sh
+git clone https://github.com/KimmiShi/TorchDistPackage.git
+cd TorchDistPackage
+pip install -e . # or pip install . --user
+```
+
+- simple example
+```py
+import torch
+from torchdistpackage import setup_distributed_slurm,test_comm,tpc
+
+# init torch disttributed
+setup_distributed_slurm()
+
+# init process groups
+dist_config = [('data',world_size/(2*pp_size)), ('pipe',pp_size), ('tensor',2)]
+tpc.setup_process_groups(dist_config)
+
+# test communication in groups
+tmp = torch.rand([100,1024]).cuda()
+
+# colective
+dist.broadcast(tmp, tpc.get_ranks_in_group('model')[0], tpc.get_group('model'))
+
+# p2p
+if tpc.is_first_in_pipeline_group():
+    dist.send(tmp, tpc.get_next_global_rank('pipe'))
+if tpc.is_last_in_pipeline_group():
+    dist.recv(tmp, tpc.get_prev_global_rank('pipe'))
+
+```
 
 # 特性介绍
 
-## 0. 简单的纯Python实现DDP - Simple DDP Module in PyTorch 
+## 0. 简单的纯Python实现DDP - Simple DDP Module in PyTorch
 
 example: [TestNaiveDdp](./torchdistpackage/ddp/test_ddp.py)
 
