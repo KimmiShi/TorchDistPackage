@@ -4,6 +4,8 @@ TorchDistPackage provides some easy-to-use modules and tools for Distributed Tra
 
 It is under construction. Welcome to use and contribute.
 
+[主要特性介绍](./Intro.md)
+
 # Simple DDP Module in PyTorch
 
 code and example: [NaiveDdp](./torchdistpackage/ddp/naive_ddp.py)
@@ -19,15 +21,12 @@ code and example: [NaiveDdp](./torchdistpackage/ddp/naive_ddp.py)
 - the all-reduce launch seems to have taken more time than TorchDDP
 
 
-# Toolkit
+# 小特性介绍
 
-## 1. [torch dist init from slurm](./torchdistpackage/dist/launch_from_slurm.py)
+## 1. 工具： 从slurm初始化torch distributed
+[torch dist init from slurm](./torchdistpackage/dist/launch_from_slurm.py)
 
-## 2. Flexible process group initialization for Mixed Parallelism
-
-**References**:
-- https://github.com/hpcaitech/ColossalAI
-
+## 2. 组件：通信组划分 Flexible process group initialization for Mixed Parallelism
 
 **Highlights:**
 
@@ -80,3 +79,7 @@ group model, ranks: [1, 5, 9, 13]
 group model, ranks: [2, 6, 10, 14]
 group model, ranks: [3, 7, 11, 15]
 ```
+
+## 3. 组件：流水并行相关
+- 自定义fwd_fn,bwd_fn的1F1B调度器 [pipeline scheduler](./torchdistpackage/parallel/pipeline_sched.py)
+- pipeline model partition [流水并行模型切分](./torchdistpackage/parallel/pipeline_helper.py)
