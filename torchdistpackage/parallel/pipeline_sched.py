@@ -1,5 +1,6 @@
 import torch
 from torchdistpackage import tpc
+from torchdistpackage.parallel import comm
 
 
 def _forward_step_in_forward_backward(
@@ -26,7 +27,10 @@ def _forward_step_in_forward_backward(
         cur_inputs.append(inp[ind * micro_bs : (ind + 1) * micro_bs])
 
     # inputs made of two parts: the prev stage output, and given mini-batch ( that should be split into micro-batches)
-    fwd_fn(*cur_inputs)
+    if len(cur_inputs) == 1:
+        return fwd_fn(cur_inputs[0])
+    else:
+        return fwd_fn(cur_inputs)
 
 
 def _backward_step_in_forward_backward(
@@ -96,9 +100,13 @@ def forward_backward(
         assert (
             not tpc.is_first_in_pipeline_group()
         ), "pipeline 1st stage should have valid inputs!"
+        inputs = []
 
-    mini_bs = inputs[0].size(0)
-    micro_bs = mini_bs / num_microbatches
+
+    micro_bs = 0
+    if len(inputs) > 0:
+        mini_bs = inputs[0].size(0)
+        micro_bs = int(mini_bs / num_microbatches)
 
     # Input, output tensors only need to be saved when doing backward passes
     input_objs = None
