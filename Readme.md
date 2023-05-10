@@ -24,13 +24,15 @@ from torchdistpackage import setup_distributed_slurm,test_comm,tpc
 setup_distributed_slurm()
 
 # init process groups
-dist_config = [('data',world_size/(2*pp_size)), ('pipe',pp_size), ('tensor',2)]
+pp_size=2
+tp_size=2
+dist_config = [('data',world_size/(2*pp_size)), ('pipe',pp_size), ('tensor',tp_size)]
 tpc.setup_process_groups(dist_config)
 
 # test communication in groups
 tmp = torch.rand([100,1024]).cuda()
 
-# colective
+# collective
 dist.broadcast(tmp, tpc.get_ranks_in_group('model')[0], tpc.get_group('model'))
 
 # p2p
@@ -61,17 +63,8 @@ example: [TestNaiveDdp](./torchdistpackage/ddp/test_ddp.py)
 ## 1. 从slurm初始化torch distributed - torch_launch_from_slurm
 [torch dist init from slurm](./torchdistpackage/dist/launch_from_slurm.py)
 
-example:
-```py
-from torchdistpackage import setup_distributed_slurm,test_comm,tpc
+[example](#安装使用)
 
-setup_distributed_slurm()
-
-dist_config = [('data',world_size/(2*pp_size)), ('pipe',pp_size), ('tensor',2)]
-tpc.setup_process_groups(dist_config)
-test_comm()
-
-```
 
 ## 2. 灵活的通信组划分 - Flexible process group initialization for Mixed Parallelism
 
