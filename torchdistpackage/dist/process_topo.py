@@ -100,6 +100,8 @@ class ProcessTopology(metaclass=SingletonMeta):
         dims = [item[0] for item in config]
         sizes = [int(item[1]) for item in config]
 
+        self._groups['global'] = None
+        self._ranks_in_group['global'] = list(range(dist.get_world_size()))
 
         for (dim, size) in config:
             cur_dim_ind = dims.index(dim)
