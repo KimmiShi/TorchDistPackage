@@ -115,16 +115,21 @@ class ProcessTopology(metaclass=SingletonMeta):
                 model_ranks = [dp_ranks[g] for dp_ranks in self._ranks_all['data']]
                 build_group("model", model_ranks)
 
-    def get_group(self, type_name):
-        return self._groups[type_name]
+    def _is_inited(self, mode):
+        return mode in self._groups
 
+    def get_group(self, mode):
+        if not self._is_inited(mode):
+            assert False, f"{mode} is not initialized!"
+        return self._groups[mode]
 
-    def get_group_rank(self, type_name):
-        return dist.get_rank(group=self._groups[type_name])
+    def get_group_rank(self, mode):
+        return dist.get_rank(group=self.get_groups(mode))
 
-
-    def get_ranks_in_group(self, type_name):
-        return self._ranks_in_group[type_name]
+    def get_ranks_in_group(self, mode):
+        if not self._is_inited(mode):
+            assert False, f"{mode} is not initialized!"
+        return self._ranks_in_group[mode]
 
     def get_tp_rank(self):
         return self.get_group_rank('tensor')
@@ -138,8 +143,10 @@ class ProcessTopology(metaclass=SingletonMeta):
     def get_mp_rank(self):
         return self.get_group_rank('model')
 
-    def get_group_size(self, type_name):
-        return len(self._ranks_in_group[type_name])
+    def get_group_size(self, mode):
+        if not self._is_inited(mode):
+            assert False, f"{mode} is not initialized!"
+        return len(self._ranks_in_group[mode])
 
     def get_tp_size(self):
         return self.get_group_size('tensor')
@@ -153,11 +160,11 @@ class ProcessTopology(metaclass=SingletonMeta):
     def get_mp_size(self):
         return self.get_group_size('model')
 
-    def is_first_in_group(self, type_name):
-        return self.get_group_rank(type_name) == 0
+    def is_first_in_group(self, mode):
+        return self.get_group_rank(mode) == 0
 
-    def is_last_in_group(self, type_name):
-        return dist.get_rank() == self._ranks_in_group[type_name][-1]
+    def is_last_in_group(self, mode):
+        return dist.get_rank() == self._ranks_in_group[mode][-1]
 
     def is_first_in_tensor_group(self):
         return self.is_first_in_group('tensor')
@@ -183,31 +190,35 @@ class ProcessTopology(metaclass=SingletonMeta):
     def is_last_in_model_group(self):
         return self.is_last_in_group('model')
 
-    def get_prev_global_rank(self, type_name = 'pipe'):
-        local_rank = self.get_group_rank(type_name)
-        world_size = self.get_group_size(type_name)
-        ranks_in_group = self.get_ranks_in_group(type_name)
+    def get_prev_global_rank(self, mode = 'pipe'):
+        local_rank = self.get_group_rank(mode)
+        world_size = self.get_group_size(mode)
+        ranks_in_group = self.get_ranks_in_group(mode)
 
         return ranks_in_group[(local_rank - 1) % world_size]
 
-    def get_next_global_rank(self, type_name = 'pipe'):
-        local_rank = self.get_group_rank(type_name)
-        world_size = self.get_group_size(type_name)
-        ranks_in_group = self.get_ranks_in_group(type_name)
+    def get_next_global_rank(self, mode = 'pipe'):
+        local_rank = self.get_group_rank(mode)
+        world_size = self.get_group_size(mode)
+        ranks_in_group = self.get_ranks_in_group(mode)
 
         return ranks_in_group[(local_rank + 1) % world_size]
 
-    def is_mode_inited(self, type_name):
-        return type_name in self._groups and self.get_group_size(type_name)>1
+    def is_mode_inited(self, mode):
+        return mode in self._groups and self.get_group_size(mode)>1
 
     def all_dp_ranks(self):
         return self._ranks_all['data']
 
-    def is_first_group(self, type_name):
+    def is_first_group(self, mode):
         # process group of 'type' may have several groups,
         # sometime we only need process in the 'first' group to dp sth
-        group_ranks = self._ranks_in_group[type_name]
-        if group_ranks == self._ranks_all[type_name][0]:
+
+        if not self._is_inited(mode):
+            assert False, f"{mode} is not initialized!"
+
+        group_ranks = self._ranks_in_group[mode]
+        if group_ranks == self._ranks_all[mode][0]:
             return True
         else:
             return  False

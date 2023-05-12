@@ -39,13 +39,13 @@ def test_collection(ele_num_total, mode = 'all_reduce', group=None):
 
     dist.barrier()
     torch.cuda.synchronize()
-    beg=time.time()
+    beg=time.perf_counter()
     for _ in range(num_repeat):
         comm_op(tensor, group=group)
     dist.barrier()
     torch.cuda.synchronize()
 
-    time_avg = (time.time()-beg)/num_repeat
+    time_avg = (time.perf_counter()-beg)/num_repeat
     algbw = (ele_num_total*2/1e9)/time_avg # GB/s
     bw = algbw * frac * ((ws-1)/ws)
     bw = round(bw, 3)
@@ -56,6 +56,26 @@ def test_collection(ele_num_total, mode = 'all_reduce', group=None):
     torch.cuda.synchronize()
     return bw,time_avg
 
+
+def test_all2all_balanced(ele_num, group=None):
+    tensor = torch.ones(ele_num).cuda() * dist.get_rank()
+
+    output = torch.empty_like(tensor)
+    dist.all_to_all_single(output, tensor, group=group)
+
+    dist.barrier()
+    torch.cuda.synchronize()
+
+    num_repeat = 1
+    beg=time.perf_counter()
+    for _ in range(num_repeat):
+        dist.all_to_all_single(output, tensor, group=group)
+    dist.barrier()
+    torch.cuda.synchronize()
+    time_avg = (time.perf_counter()-beg)/num_repeat
+
+    if dist.get_rank()==0:
+        print(f"all2all_balanced repeat={num_repeat}, time_avg:{time_avg} s, numel={tensor.numel()}")
 
 
 if __name__=="__main__":

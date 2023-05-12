@@ -1,7 +1,11 @@
 import torch
+import torch.nn as nn
 from torchdistpackage import tpc
 
-def partition_uniform(flat_sequence, extra_len=0):
+def partition_uniform(flat_sequence, extra_len=0) -> list:
+    """
+        accept a list and return a list of Modules
+    """
     rank = tpc.get_group_rank('pipe')
     world_size = tpc.get_group_size('pipe')
     leng = len(flat_sequence) + extra_len
@@ -116,8 +120,53 @@ def flatten_sequence(sequence, level = 1):
         res += flatten_sequence(element, level - 1)
     return res
 
+def flatten_model(model, layer_list, return_list=False):
+    """
+        flatten a model that is not a nn.Sequential, but according to a list of layer name
+        Example:
+            exec_seq = [
+                'conv1', 'bn1', 'relu', 'maxpool', 'layer1', 'layer2', 'layer3', 'layer4', 'avgpool',
+                lambda x: torch.flatten(x, 1), 'fc'
+            ]
+            seq_model = flatten_model(model, exec_seq)
+    """
+    module_list = []
+    for layer_name in layer_list:
+        if isinstance(layer_name, str):
+            sub_mod = getattr(model, layer_name)
+            if isinstance(sub_mod, torch.nn.modules.container.Sequential) or isinstance(sub_mod, torch.nn.ModuleList):
+                for op in sub_mod:
+                    module_list.append(op)
+            else:
+                module_list.append(sub_mod)
+        elif isinstance(layer_name, torch.nn.Module):
+            module_list.append(layer_name)
+        elif callable(layer_name):
+            # maybe lambda, or functions, this maynot work for nn.Sequential
+            module_list.append(layer_name)
+        else:
+            # unknown
+            print("flatten_model do not support layer: ", layer_name, type(layer_name))
+            raise NotImplementedError()
+    if return_list:
+        return module_list
+    return nn.Sequential(*module_list)
+
 def flat_and_partition(sequence, flat_level=1, partition_policy='uniform', **kwargs):
     flattened = flatten_sequence(sequence, flat_level)
     partition_fn = eval(f"partition_{partition_policy}")
     cur_partition = partition_fn(flattened, **kwargs)
     return cur_partition
+
+class ListModule(torch.nn.Module):
+    """
+        wraps a list of [Module, callable] into a nn.Module
+    """
+    def __init__(self, modules):
+        super(ListModule, self).__init__()
+        self.layers = nn.ModuleList(modules)
+
+    def forward(self, x):
+        for layer in self.layers:
+            x = layer(x)
+        return x
