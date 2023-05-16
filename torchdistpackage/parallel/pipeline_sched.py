@@ -225,3 +225,45 @@ def forward_backward(
             )
 
     return
+
+def forward_eval(
+    fwd_fn,
+    inputs,
+    dtype,
+    **kwargs
+):
+    """
+        params:
+            fwd_fn: the fwd func of current stage
+            inputs: inputs for current stage, for the first stage this must not be None,
+                    for other stages, this could be None, and could also have extra inputs
+            num_microbatches: the micro-batch number
+            dtype: tensor dtype
+    """
+
+    scatter_gather_tensors = False
+    fwd_inputs = []
+    # receve output from prev stage except for 1st stage
+    if not tpc.is_first_in_pipeline_group():
+        ft_shapes = None
+        ft_shapes = comm.recv_obj_meta(ft_shapes)
+        output_from_prev = comm.recv_forward(ft_shapes, dtype=dtype, scatter_gather_tensors=scatter_gather_tensors)
+        fwd_inputs.append(output_from_prev)
+
+    # create input
+    if isinstance(inputs, torch.Tensor):
+        fwd_inputs.append(inputs)
+    elif isinstance(inputs, list):
+        for inp in inputs:
+            fwd_inputs.append(inp)
+
+    if len(fwd_inputs)==1:
+        fwd_inputs = fwd_inputs[0]
+    # run forward
+    fwd_output = None
+    fwd_output = fwd_fn(fwd_inputs)
+    if not tpc.is_last_in_pipeline_group():
+        comm.send_obj_meta(fwd_output)
+        comm.send_forward(fwd_output, scatter_gather_tensors=scatter_gather_tensors)
+
+    return fwd_output

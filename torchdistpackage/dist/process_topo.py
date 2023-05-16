@@ -124,7 +124,7 @@ class ProcessTopology(metaclass=SingletonMeta):
         return self._groups[mode]
 
     def get_group_rank(self, mode):
-        return dist.get_rank(group=self.get_groups(mode))
+        return dist.get_rank(group=self.get_group(mode))
 
     def get_ranks_in_group(self, mode):
         if not self._is_inited(mode):
@@ -209,6 +209,12 @@ class ProcessTopology(metaclass=SingletonMeta):
 
     def all_dp_ranks(self):
         return self._ranks_all['data']
+
+    def all_ranks(self, mode):
+        if not self._is_inited(mode):
+            assert False, f"{mode} is not initialized!"
+
+        return self._ranks_all[mode]
 
     def is_first_group(self, mode):
         # process group of 'type' may have several groups,
