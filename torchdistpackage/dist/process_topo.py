@@ -56,6 +56,17 @@ class ProcessTopology(metaclass=SingletonMeta):
         self._ranks_in_group = dict()
         self._ranks_all = defaultdict(list)
 
+    def _build_group(self, type, ranks):
+        self._ranks_all[type].append(ranks)
+        from datetime import timedelta
+        grp = dist.new_group(ranks, timeout=timedelta(seconds=100))
+        if dist.get_rank() in ranks:
+            self._groups[type] = grp
+            self._ranks_in_group[type] = ranks
+
+            if dist.get_rank() == ranks[0]:
+                print(f"group {type}, ranks: {ranks}")
+
     def setup_process_groups(self, config:list):
         """
             Example: setup_process_groups([('data',4), ('pipe',2), ('tensor',2)])   # world_size=16
@@ -86,17 +97,6 @@ class ProcessTopology(metaclass=SingletonMeta):
                 test_comm()
 
         """
-        def build_group(type, ranks):
-            self._ranks_all[type].append(ranks)
-            from datetime import timedelta
-            grp = dist.new_group(ranks, timeout=timedelta(seconds=100))
-            if dist.get_rank() in ranks:
-                self._groups[type] = grp
-                self._ranks_in_group[type] = ranks
-
-                if dist.get_rank() == ranks[0]:
-                    print(f"group {type}, ranks: {ranks}")
-
         dims = [item[0] for item in config]
         sizes = [int(item[1]) for item in config]
 
@@ -107,21 +107,21 @@ class ProcessTopology(metaclass=SingletonMeta):
             cur_dim_ind = dims.index(dim)
             strides=sizes[cur_dim_ind+1:] if cur_dim_ind+1 < len(sizes) else []
 
-            gen_groups(dist.get_world_size(), size, strides, partial(build_group, dim))
+            gen_groups(dist.get_world_size(), size, strides, partial(self._build_group, dim))
 
         # build Model Parallel Group Automatically
         if "tensor" in dims or "pipe" in dims:
             for g in range(len(self._ranks_all['data'][0])):
                 model_ranks = [dp_ranks[g] for dp_ranks in self._ranks_all['data']]
-                build_group("model", model_ranks)
+                self._build_group("model", model_ranks)
 
-    def build_moe_groups(moe_dp_size=1):
+    def build_moe_groups(self, moe_dp_size=1):
         # build for moe: moe_data_parallel, moe_expert_parallel
         # default: moe_expert_parallel group = DDP group
-        dp_ranks = self.get_ranks_in_group['data']
+        dp_ranks = self.get_ranks_in_group('data')
 
         if moe_dp_size <= 1:
-            self._groups['moe_ep'] == self._groups['data']
+            self._groups['moe_ep'] = self._groups['data']
             self._ranks_in_group['moe_ep'] = dp_ranks
             return
 
@@ -133,11 +133,11 @@ class ProcessTopology(metaclass=SingletonMeta):
         for ep_g_id in range(num_ep_groups):
             moe_ep_ranks_id = list(range(ep_g_id*moe_ep_size, (ep_g_id+1)*moe_ep_size))
             moe_ep_ranks = [dp_ranks[i] for i in moe_ep_ranks_id]
-            build_group("moe_ep", moe_ep_ranks)
+            self._build_group("moe_ep", moe_ep_ranks)
         for dp_g_id in range(num_dp_groups):
-            moe_dp_ranks_id = list(range(dp_g_id, len(dp_ranks) -1 ,moe_ep_size))
+            moe_dp_ranks_id = list(range(dp_g_id, len(dp_ranks) ,moe_ep_size))
             moe_dp_ranks = [dp_ranks[i] for i in moe_dp_ranks_id]
-            build_group("moe_dp", moe_dp_ranks)
+            self._build_group("moe_dp", moe_dp_ranks)
 
 
 
