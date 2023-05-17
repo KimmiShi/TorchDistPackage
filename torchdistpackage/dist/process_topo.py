@@ -115,6 +115,32 @@ class ProcessTopology(metaclass=SingletonMeta):
                 model_ranks = [dp_ranks[g] for dp_ranks in self._ranks_all['data']]
                 build_group("model", model_ranks)
 
+    def build_moe_groups(moe_dp_size=1):
+        # build for moe: moe_data_parallel, moe_expert_parallel
+        # default: moe_expert_parallel group = DDP group
+        dp_ranks = self.get_ranks_in_group['data']
+
+        if moe_dp_size <= 1:
+            self._groups['moe_ep'] == self._groups['data']
+            self._ranks_in_group['moe_ep'] = dp_ranks
+            return
+
+        assert moe_dp_size <= self.get_dp_size()
+        moe_ep_size = int(self.get_dp_size()//moe_dp_size)
+        num_ep_groups = int(self.get_dp_size() // moe_ep_size)
+        num_dp_groups = int(self.get_dp_size() // moe_dp_size)
+
+        for ep_g_id in range(num_ep_groups):
+            moe_ep_ranks_id = list(range(ep_g_id*moe_ep_size, (ep_g_id+1)*moe_ep_size))
+            moe_ep_ranks = [dp_ranks[i] for i in moe_ep_ranks_id]
+            build_group("moe_ep", moe_ep_ranks)
+        for dp_g_id in range(num_dp_groups):
+            moe_dp_ranks_id = list(range(dp_g_id, len(dp_ranks) -1 ,moe_ep_size))
+            moe_dp_ranks = [dp_ranks[i] for i in moe_dp_ranks_id]
+            build_group("moe_dp", moe_dp_ranks)
+
+
+
     def _is_inited(self, mode):
         return mode in self._groups
 
