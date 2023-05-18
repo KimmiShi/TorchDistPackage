@@ -128,6 +128,19 @@ def flatten_sequence(sequence, level=1):
     return res
 
 
+class CallableModule(torch.nn.Module):
+    """
+        wraps a Callable into a nn.Module
+    """
+
+    def __init__(self, fn):
+        super(CallableModule, self).__init__()
+        self.fn = fn
+
+    def forward(self, x):
+        return self.fn(x)
+
+
 def flatten_model(model, layer_list, return_list=False):
     """
         flatten a model that is not a nn.Sequential, but according to a list of layer name
@@ -153,7 +166,7 @@ def flatten_model(model, layer_list, return_list=False):
             module_list.append(layer_name)
         elif callable(layer_name):
             # maybe lambda, or functions, this maynot work for nn.Sequential
-            module_list.append(layer_name)
+            module_list.append(CallableModule(layer_name))
         else:
             # unknown
             print("flatten_model do not support layer: ", layer_name, type(layer_name))
@@ -168,18 +181,3 @@ def flat_and_partition(sequence, flat_level=1, partition_policy="uniform", **kwa
     partition_fn = eval(f"partition_{partition_policy}")
     cur_partition = partition_fn(flattened, **kwargs)
     return cur_partition
-
-
-class ListModule(torch.nn.Module):
-    """
-        wraps a list of [Module, callable] into a nn.Module
-    """
-
-    def __init__(self, modules):
-        super(ListModule, self).__init__()
-        self.layers = nn.ModuleList(modules)
-
-    def forward(self, x):
-        for layer in self.layers:
-            x = layer(x)
-        return x
