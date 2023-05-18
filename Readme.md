@@ -75,13 +75,4 @@ example: [TestNaiveDdp](./torchdistpackage/ddp/test_ddp.py)
 - 自定义fwd_fn,bwd_fn的1F1B调度器 [pipeline scheduler](./torchdistpackage/parallel/pipeline_sched.py)
 - pipeline model partition [流水并行模型切分](./torchdistpackage/parallel/pipeline_helper.py)
 
-example: partition a resnet:
-```
-    layer_list = [
-        'conv1', 'bn1', 'relu', 'maxpool', 'layer1', 'layer2', 'layer3', 'layer4', 'avgpool',
-        lambda x: torch.flatten(x, 1), 'fc'
-    ]
-    flat_model = flatten_model(model, layer_list , return_list=True)
-    md_list = partition_uniform(flat_model)
-    model = torch.nn.Sequential(*md_list)
-```
+[使用示例](./torchdistpackage/parallel/pipeline.md)
