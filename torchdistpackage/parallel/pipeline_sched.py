@@ -102,7 +102,6 @@ def forward_backward(
         ), "pipeline 1st stage should have valid inputs!"
         inputs = []
 
-
     micro_bs = 0
     if len(inputs) > 0:
         mini_bs = inputs[0].size(0)
@@ -226,12 +225,8 @@ def forward_backward(
 
     return
 
-def forward_eval(
-    fwd_fn,
-    inputs,
-    dtype,
-    **kwargs
-):
+
+def forward_eval(fwd_fn, inputs, dtype, **kwargs):
     """
         params:
             fwd_fn: the fwd func of current stage
@@ -247,7 +242,9 @@ def forward_eval(
     if not tpc.is_first_in_pipeline_group():
         ft_shapes = None
         ft_shapes = comm.recv_obj_meta(ft_shapes)
-        output_from_prev = comm.recv_forward(ft_shapes, dtype=dtype, scatter_gather_tensors=scatter_gather_tensors)
+        output_from_prev = comm.recv_forward(
+            ft_shapes, dtype=dtype, scatter_gather_tensors=scatter_gather_tensors
+        )
         fwd_inputs.append(output_from_prev)
 
     # create input
@@ -257,7 +254,7 @@ def forward_eval(
         for inp in inputs:
             fwd_inputs.append(inp)
 
-    if len(fwd_inputs)==1:
+    if len(fwd_inputs) == 1:
         fwd_inputs = fwd_inputs[0]
     # run forward
     fwd_output = None

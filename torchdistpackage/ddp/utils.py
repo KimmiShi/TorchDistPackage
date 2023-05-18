@@ -5,12 +5,14 @@ from torch.distributed import ReduceOp
 
 glb_reduce_stream = torch.cuda.Stream()
 
+
 def reduce_grad(grad, group, reduce_op):
     global glb_reduce_stream
     glb_reduce_stream.wait_stream(torch.cuda.current_stream())
 
     with torch.cuda.stream(glb_reduce_stream):
         dist.all_reduce(grad, group=group, async_op=False, op=reduce_op)
+
 
 def register_reduce_hook_for_param(p, group, reduce_op=ReduceOp.AVG):
     if p.requires_grad:

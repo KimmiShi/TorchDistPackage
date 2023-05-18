@@ -19,6 +19,12 @@ class NaiveDDP(torch.nn.Module):
         sync (boolean, default: False):
             True -> the gradient allreduce will happen after backward;
             False -> the gradient allreduce will overlap with backward.
+        gradient_as_bucket_view: bucket grads
+        process_group: DP process group
+        dp_rank0: the first rank (rank0) of dp process group, when used with Model Parallel, rank0 is not always equal to '0'
+        reduce_op: 'avg' or 'sum
+        kwargs:
+            num_grad_acc_iter: only do reduce grad after backward for num_grad_acc_iter times
     """
 
     def __init__(
@@ -28,7 +34,6 @@ class NaiveDDP(torch.nn.Module):
         bucket_cap_mb=25,
         gradient_as_bucket_view=False,
         process_group=None,
-        params_to_group=None,
         dp_rank0=0,
         reduce_op="avg",
         **kwargs,
@@ -41,9 +46,8 @@ class NaiveDDP(torch.nn.Module):
         else:
             self.parameters_to_ignore = []
 
-        self.group = process_group or None
+        self.group = process_group
         self.dp_rank0 = dp_rank0
-        self.params_to_group = params_to_group or {}
         self.reduce_op = ReduceOp.SUM if reduce_op.lower == "sum" else ReduceOp.AVG
 
         # Holds all_reduce handles, used when async_reduction is True
@@ -72,7 +76,6 @@ class NaiveDDP(torch.nn.Module):
 
         self.reduce_stream = torch.cuda.Stream()
         if not sync and dist.get_world_size(self.group) > 1:
-            self._grad_accs = []
             self._register_hooks()
 
     def forward(self, *inputs, **kwargs):
@@ -87,8 +90,6 @@ class NaiveDDP(torch.nn.Module):
                 p_tmp = p.expand_as(p)
                 grad_acc = p_tmp.grad_fn.next_functions[0][0]
                 grad_acc.register_hook(self._make_hook(name, p, i))
-                self._grad_accs.append(grad_acc)
-                self.param_infos[name] = ParamInfo(name, p, i, self._get_group(name, p))
 
     def _get_group(self, name, param):
         return self.group
@@ -233,15 +234,15 @@ class NaiveDDP(torch.nn.Module):
                 dist.broadcast(param, self.dp_rank0, group=self._get_group(name, param))
 
 
-class ParamInfo(object):
-    def __init__(self, name, param, index, group):
-        self.name = name
-        self.param = param
-        self.index = index
-        self.group = group
+# class ParamInfo(object):
+#     def __init__(self, name, param, index, group):
+#         self.name = name
+#         self.param = param
+#         self.index = index
+#         self.group = group
 
-    def get_info(self):
-        return (self.name, self.param, self.index)
+#     def get_info(self):
+#         return (self.name, self.param, self.index)
 
 
 class GradBucket(object):

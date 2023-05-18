@@ -2,16 +2,17 @@ import torch
 import torch.nn as nn
 from torchdistpackage import tpc
 
+
 def partition_uniform(flat_sequence, extra_len=0) -> list:
     """
         accept a list and return a list of Modules
     """
-    rank = tpc.get_group_rank('pipe')
-    world_size = tpc.get_group_size('pipe')
+    rank = tpc.get_group_rank("pipe")
+    world_size = tpc.get_group_size("pipe")
     leng = len(flat_sequence) + extra_len
     length = leng // world_size
-    beg = rank*length
-    end = (rank+1)*length if rank!=world_size-1 else len(flat_sequence)
+    beg = rank * length
+    end = (rank + 1) * length if rank != world_size - 1 else len(flat_sequence)
     kept_flat_sequence = flat_sequence[beg:end]
     return kept_flat_sequence
 
@@ -48,6 +49,7 @@ def _heap_addition(weights: list, intervals: list, add_cnt: int):
     ret_intervals.sort()
     return ret_intervals
 
+
 def _calc_partitions(weights, value):
     prev = 0
     prefix = 0
@@ -63,6 +65,7 @@ def _calc_partitions(weights, value):
 
     intervals.append((prev, len(weights)))
     return num_block + 1, intervals
+
 
 def _binary_search(weights, num):
     length = len(weights)
@@ -87,10 +90,12 @@ def _binary_search(weights, num):
 
     return intervals
 
+
 def partition_balanced(flat_sequence, sequence, **kwargs):
-    rank = tpc.get_group_rank('pipe')
-    world_size = tpc.get_group_size('pipe')
+    rank = tpc.get_group_rank("pipe")
+    world_size = tpc.get_group_size("pipe")
     assert len(flat_sequence) >= world_size
+
     def count_params(model):
         param_count = 0
         for param in model.parameters():
@@ -98,13 +103,15 @@ def partition_balanced(flat_sequence, sequence, **kwargs):
         if param_count == 0:
             param_count = 1
         return param_count
+
     weight_sequence = [count_params(item) for item in flat_sequence]
     del count_params
     intervals = _binary_search(weight_sequence, world_size)
-    sequence = flat_sequence[intervals[rank][0]:intervals[rank][1]]
+    sequence = flat_sequence[intervals[rank][0] : intervals[rank][1]]
     return sequence
 
-def flatten_sequence(sequence, level = 1):
+
+def flatten_sequence(sequence, level=1):
     """
         Flatten a give model of type nn.Sequential, since the child module maybe nn.Sequential
     """
@@ -120,6 +127,7 @@ def flatten_sequence(sequence, level = 1):
         res += flatten_sequence(element, level - 1)
     return res
 
+
 def flatten_model(model, layer_list, return_list=False):
     """
         flatten a model that is not a nn.Sequential, but according to a list of layer name
@@ -134,7 +142,9 @@ def flatten_model(model, layer_list, return_list=False):
     for layer_name in layer_list:
         if isinstance(layer_name, str):
             sub_mod = getattr(model, layer_name)
-            if isinstance(sub_mod, torch.nn.modules.container.Sequential) or isinstance(sub_mod, torch.nn.ModuleList):
+            if isinstance(sub_mod, torch.nn.modules.container.Sequential) or isinstance(
+                sub_mod, torch.nn.ModuleList
+            ):
                 for op in sub_mod:
                     module_list.append(op)
             else:
@@ -152,16 +162,19 @@ def flatten_model(model, layer_list, return_list=False):
         return module_list
     return nn.Sequential(*module_list)
 
-def flat_and_partition(sequence, flat_level=1, partition_policy='uniform', **kwargs):
+
+def flat_and_partition(sequence, flat_level=1, partition_policy="uniform", **kwargs):
     flattened = flatten_sequence(sequence, flat_level)
     partition_fn = eval(f"partition_{partition_policy}")
     cur_partition = partition_fn(flattened, **kwargs)
     return cur_partition
 
+
 class ListModule(torch.nn.Module):
     """
         wraps a list of [Module, callable] into a nn.Module
     """
+
     def __init__(self, modules):
         super(ListModule, self).__init__()
         self.layers = nn.ModuleList(modules)
