@@ -281,8 +281,9 @@ def test_comm():
     dist.broadcast(len_dl_tensor, torch_parallel_context.get_ranks_in_group('model')[0], torch_parallel_context.get_group('model'))
     torch.cuda.synchronize()
 
-    outs = [torch.rand_like(tmp) for _ in range(torch_parallel_context.get_group_size('tensor'))]
-    dist.all_gather(outs, tmp, group=torch_parallel_context.get_group('tensor'))
+    if torch_parallel_context.is_mode_inited('tensor'):
+        outs = [torch.rand_like(tmp) for _ in range(torch_parallel_context.get_group_size('tensor'))]
+        dist.all_gather(outs, tmp, group=torch_parallel_context.get_group('tensor'))
     torch.cuda.synchronize()
 
 

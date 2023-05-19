@@ -118,7 +118,8 @@ def forward_backward(
     ft_shapes = None
     bt_shapes = None
     fs_checker = True
-    optimizer.zero_grad()
+    if optimizer:
+        optimizer.zero_grad()
 
     # Run warmup forward passes.
     for i in range(num_warmup_microbatches):
@@ -223,7 +224,7 @@ def forward_backward(
                 input_obj_grad, scatter_gather_tensors=scatter_gather_tensors
             )
 
-    return
+    return output_obj
 
 
 def forward_eval(fwd_fn, inputs, dtype, **kwargs):
@@ -232,7 +233,6 @@ def forward_eval(fwd_fn, inputs, dtype, **kwargs):
             fwd_fn: the fwd func of current stage
             inputs: inputs for current stage, for the first stage this must not be None,
                     for other stages, this could be None, and could also have extra inputs
-            num_microbatches: the micro-batch number
             dtype: tensor dtype
     """
 

@@ -62,3 +62,38 @@ from torchdistpackage.parallel.pipeline_sched import forward_backward, forward_e
             scatter_gather_tensors=False)
 
 ```
+
+# Example: Train Resnet -- Evaluation
+
+```py
+for images, target in data_loader:
+    images = images.to(device, non_blocking=True)
+    target = target.to(device, non_blocking=True)
+    dist.broadcast(target, tpc.get_ranks_in_group('pipe')[0], tpc.get_group('pipe'))
+
+    inputs = []
+    if tpc.is_first_in_pipeline_group():
+        inputs = images
+
+    def eval_fwd(img):
+        with torch.cuda.amp.autocast():
+            return model(img)
+
+    output = tdp_forward_backward(
+        None,
+        eval_fwd,
+        None,
+        inputs,
+        num_microbatches=1,
+        forward_only=True,
+        dtype=torch.float16,
+        scatter_gather_tensors=False)
+
+    if tpc.is_last_in_pipeline_group():
+        # compute output
+        with torch.cuda.amp.autocast():
+            loss = criterion(output, target)
+
+        acc1, acc5 = accuracy(output, target, topk=(1, 5))
+
+```
