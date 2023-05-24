@@ -74,3 +74,5 @@ example: [TestNaiveDdp](./torchdistpackage/ddp/test_ddp.py)
 ## 3. 流水并行相关 - For Pipeline Parallelism
 - 自定义fwd_fn,bwd_fn的1F1B调度器 [pipeline scheduler](./torchdistpackage/parallel/pipeline_sched.py)
 - pipeline model partition [流水并行模型切分](./torchdistpackage/parallel/pipeline_helper.py)
+
+[使用示例](./torchdistpackage/parallel/pipeline.md)
