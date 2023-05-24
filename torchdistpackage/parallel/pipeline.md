@@ -1,3 +1,5 @@
+# Pipeline Usage
+
 # Example: partition a Resnet into stages
 
 ```py
