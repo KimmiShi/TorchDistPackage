@@ -1,8 +1,10 @@
 import ctypes
-import torch
-from torch import nn
+import time
 import math
 import warnings
+
+import torch
+from torch import nn
 from torch.nn import init
 
 
@@ -57,15 +59,15 @@ class NVTX_Context(object):
         
     def __enter__(self):
         torch.cuda.nvtx.range_push(self.context_name)
-        if self.record_time
+        if self.record_time:
             torch.cuda.synchronize()
             self.start_time = time.time()
 
     def __exit__(self, type, value, traceback):
-        if self.record_time
+        if self.record_time:
             torch.cuda.synchronize()
             self.exit_time = time.time()
-            print(f"{context_name} duration is {self.exit_time - self.start_time}")
+            print(f"{self.context_name} duration is {self.exit_time - self.start_time}")
         torch.cuda.nvtx.range_pop()
     
 def _has_inf_or_nan(x, j=None):
