@@ -33,6 +33,7 @@ from torchdistpackage.parallel.clip_grad_parallel import clip_grad_norm_
         else:
             inputs.append(targets)
 
+        # this line is not necessary, forward_backward will do it.
         optimizer.zero_grad()
 
         def bwd_fn(loss):
@@ -50,7 +51,7 @@ from torchdistpackage.parallel.clip_grad_parallel import clip_grad_norm_
                     return loss
 
         num_microbatches=4
-        tdp_forward_backward(
+        forward_backward(
             optimizer,
             fwd_fn,
             bwd_fn,
@@ -81,7 +82,7 @@ for images, target in data_loader:
         with torch.cuda.amp.autocast():
             return model(img)
 
-    output = tdp_forward_backward(
+    output = forward_backward(
         None,
         eval_fwd,
         None,
