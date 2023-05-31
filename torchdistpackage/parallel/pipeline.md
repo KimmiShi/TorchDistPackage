@@ -36,8 +36,12 @@ from torchdistpackage.parallel.clip_grad_parallel import clip_grad_norm_
         # this line is not necessary, forward_backward will do it.
         optimizer.zero_grad()
 
-        def bwd_fn(loss):
-            loss.backward()
+        # an example of customized backward_fn
+        def bwd_fn(output_obj, output_obj_grad):
+            if output_obj_grad is None:
+                model.backward(output_obj)
+            else:
+                model.backward_grad(output_obj, output_obj_grad)
 
         def fwd_fn(inputs):
             with torch.cuda.amp.autocast(dtype=torch.bfloat16):
@@ -54,7 +58,7 @@ from torchdistpackage.parallel.clip_grad_parallel import clip_grad_norm_
         forward_backward(
             optimizer,
             fwd_fn,
-            bwd_fn,
+            None,   # for simple backward func like loss.backward, we can pass None
             inputs,
             num_microbatches=num_microbatches,
             forward_only=False,
@@ -100,3 +104,4 @@ for images, target in data_loader:
         acc1, acc5 = accuracy(output, target, topk=(1, 5))
 
 ```
+
