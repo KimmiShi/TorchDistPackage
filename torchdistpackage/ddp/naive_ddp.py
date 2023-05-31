@@ -34,7 +34,6 @@ class NaiveDDP(torch.nn.Module):
         bucket_cap_mb=25,
         gradient_as_bucket_view=False,
         process_group=None,
-        params_to_group=None,
         dp_rank0=0,
         reduce_op="avg",
         **kwargs,
@@ -49,7 +48,6 @@ class NaiveDDP(torch.nn.Module):
 
         self.group = process_group or None
         self.dp_rank0 = dp_rank0
-        self.params_to_group = params_to_group or {}
         self.reduce_op = ReduceOp.SUM if reduce_op.lower == "sum" else ReduceOp.AVG
 
         # Holds all_reduce handles, used when async_reduction is True
@@ -214,11 +212,6 @@ class NaiveDDP(torch.nn.Module):
                 ):
                     if dist.get_world_size(self._get_group(name, param)) <= 1:
                         continue
-                    if param.grad is None:
-                        import pdb
-
-                        pdb.set_trace()
-                        print(name, " grad is none")
                     self._do_grad_reduce(name, param, i)
         # else:
         #     for handle in self.async_handles:
