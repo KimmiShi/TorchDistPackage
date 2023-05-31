@@ -46,7 +46,7 @@ class NaiveDDP(torch.nn.Module):
         else:
             self.parameters_to_ignore = []
 
-        self.group = process_group
+        self.group = process_group or None
         self.dp_rank0 = dp_rank0
         self.reduce_op = ReduceOp.SUM if reduce_op.lower == "sum" else ReduceOp.AVG
 
@@ -63,7 +63,6 @@ class NaiveDDP(torch.nn.Module):
         self.buckets_idx = 0
 
         self.num_iter = 0
-        self.param_infos = {}
         self.lock = Lock()
 
         self.reduce_time = 0.0
@@ -76,6 +75,7 @@ class NaiveDDP(torch.nn.Module):
 
         self.reduce_stream = torch.cuda.Stream()
         if not sync and dist.get_world_size(self.group) > 1:
+            self._grad_accs = []
             self._register_hooks()
 
     def forward(self, *inputs, **kwargs):
@@ -90,6 +90,7 @@ class NaiveDDP(torch.nn.Module):
                 p_tmp = p.expand_as(p)
                 grad_acc = p_tmp.grad_fn.next_functions[0][0]
                 grad_acc.register_hook(self._make_hook(name, p, i))
+                self._grad_accs.append(grad_acc)    # ! very important
 
     def _get_group(self, name, param):
         return self.group
@@ -211,11 +212,6 @@ class NaiveDDP(torch.nn.Module):
                 ):
                     if dist.get_world_size(self._get_group(name, param)) <= 1:
                         continue
-                    if param.grad is None:
-                        import pdb
-
-                        pdb.set_trace()
-                        print(name, " grad is none")
                     self._do_grad_reduce(name, param, i)
         # else:
         #     for handle in self.async_handles:
@@ -232,17 +228,6 @@ class NaiveDDP(torch.nn.Module):
         for name, param in self.module.state_dict().items():
             if name not in self.parameters_to_ignore:
                 dist.broadcast(param, self.dp_rank0, group=self._get_group(name, param))
-
-
-# class ParamInfo(object):
-#     def __init__(self, name, param, index, group):
-#         self.name = name
-#         self.param = param
-#         self.index = index
-#         self.group = group
-
-#     def get_info(self):
-#         return (self.name, self.param, self.index)
 
 
 class GradBucket(object):

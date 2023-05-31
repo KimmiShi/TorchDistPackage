@@ -50,7 +50,7 @@ def _backward_step_in_forward_backward(
                     in_tensor.retain_grad()
     if backward_fn is None:
         if output_obj_grad is None:
-            output_obj.backward()       # equal to loss.backward
+            output_obj.backward()  # equal to loss.backward
         else:
             torch.autograd.backward(tensors=output_obj, grad_tensors=output_obj_grad)
     else:

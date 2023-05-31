@@ -1,9 +1,9 @@
 import copy
 import torch
 import torch.nn as nn
-from core.distributed_utils import dist_init_slurm, init_comm_groups, init_link_dp
 import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
+from torchdistpackage import setup_distributed_slurm, NaiveDDP
 
 
 class MyModule(nn.Module):
@@ -17,7 +17,7 @@ class MyModule(nn.Module):
         return self.fc2(out)
 
 
-dist_init_slurm()
+setup_distributed_slurm()
 rank = dist.get_rank()
 device = rank % torch.cuda.device_count()
 torch.cuda.set_device(device)
@@ -25,9 +25,7 @@ torch.cuda.set_device(device)
 model = MyModule().cuda()
 model2 = copy.deepcopy(model)
 
-from mydist import NaiveDdp
-
-my_ddp_model = NaiveDdp(model, sync=False, gradient_as_bucket_view=True)
+my_ddp_model = NaiveDDP(model, sync=False, gradient_as_bucket_view=True)
 torch_ddp_model = DDP(model2)
 
 for _ in range(3):
