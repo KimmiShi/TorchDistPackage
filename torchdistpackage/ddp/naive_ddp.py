@@ -25,6 +25,8 @@ class NaiveDDP(torch.nn.Module):
         reduce_op: 'avg' or 'sum
         kwargs:
             num_grad_acc_iter: only do reduce grad after backward for num_grad_acc_iter times
+
+    Note: for bucket, a warmup iter is needed to build up bucket, and correctly reduce grads
     """
 
     def __init__(
@@ -63,7 +65,7 @@ class NaiveDDP(torch.nn.Module):
         self.buckets_idx = 0
 
         self.num_iter = 0
-        self.lock = Lock()
+        # self.lock = Lock()
 
         self.reduce_time = 0.0
         self.hook_time = 0.0
@@ -71,7 +73,6 @@ class NaiveDDP(torch.nn.Module):
 
         self.num_grad_acc_iter = kwargs.get("num_grad_acc_iter", 1)
         self.grad_reduce_cnts = {}
-        # Note: for bucket, a warmup iter is needed to build up bucket, and correctly reduce grads
 
         self.reduce_stream = torch.cuda.Stream()
         if not sync and dist.get_world_size(self.group) > 1:
@@ -126,7 +127,7 @@ class NaiveDDP(torch.nn.Module):
                     pdb.set_trace()
                     print("Exception at _reduce_grads")
 
-    def _do_grad_reduce(self, name, p, idx=None):
+    def reduce_dispatch(self, name, p, idx=None):
         should_bucket = (
             lambda grad: grad.element_size() * grad.numel()
             < self.bucket_cap_bytes * 4 // 5
@@ -175,7 +176,7 @@ class NaiveDDP(torch.nn.Module):
             # make grad thread safe
             # with self.lock:
 
-            self._do_grad_reduce(name, p, i)
+            self.reduce_dispatch(name, p, i)
 
         return hook
 
@@ -212,7 +213,7 @@ class NaiveDDP(torch.nn.Module):
                 ):
                     if dist.get_world_size(self._get_group(name, param)) <= 1:
                         continue
-                    self._do_grad_reduce(name, param, i)
+                    self.reduce_dispatch(name, param, i)
         # else:
         #     for handle in self.async_handles:
         #         handle.wait()
@@ -228,6 +229,43 @@ class NaiveDDP(torch.nn.Module):
         for name, param in self.module.state_dict().items():
             if name not in self.parameters_to_ignore:
                 dist.broadcast(param, self.dp_rank0, group=self._get_group(name, param))
+
+
+moe_dp_hooks = []
+moe_dp_reduce_stream = torch.cuda.Stream()
+
+def create_moe_dp_hooks(self, param_list, moe_dp_group, moe_dp_rank0, overlap_comm=True, reduce_op=ReduceOp.AVG):
+    global moe_dp_hooks
+    global moe_dp_reduce_stream
+    # broadcast
+    def _register_hooks(p, group):
+        if p.requires_grad and dist.get_world_size(group) > 1:
+            p_tmp = p.expand_as(p)
+            grad_acc = p_tmp.grad_fn.next_functions[0][0]
+
+            def reduce_grads(*notneeded):
+                if overlap_comm:
+                    stream = moe_dp_reduce_stream
+                    stream.wait_stream(torch.cuda.current_stream())
+                else:
+                    stream = torch.cuda.current_stream()
+
+                with torch.cuda.stream(stream):
+                    try:
+                        dist.all_reduce(
+                            p.grad, group=group, async_op=False, op=reduce_op
+                        )
+                    except Exception as e:
+                        import pdb
+                        pdb.set_trace()
+                        print("Exception at _reduce_grads")
+
+            grad_acc.register_hook(reduce_grads)
+            moe_dp_hooks.append(grad_acc)    # ! very important
+
+    for param in param_list:
+        dist.broadcast(param, moe_dp_rank0, group=moe_dp_group)
+        _register_hooks(p, moe_dp_group)
 
 
 class GradBucket(object):

@@ -285,13 +285,13 @@ def test_comm():
     if torch_parallel_context.is_mode_inited('tensor'):
         outs = [torch.rand_like(tmp) for _ in range(torch_parallel_context.get_group_size('tensor'))]
         dist.all_gather(outs, tmp, group=torch_parallel_context.get_group('tensor'))
-    torch.cuda.synchronize()
+        torch.cuda.synchronize()
 
-
-    if torch_parallel_context.is_first_in_pipeline_group():
-        dist.send(tmp, torch_parallel_context.get_next_global_rank('pipe'))
-    if torch_parallel_context.is_last_in_pipeline_group():
-        dist.recv(tmp, torch_parallel_context.get_prev_global_rank('pipe'))
-    torch.cuda.synchronize()
+    if torch_parallel_context.is_mode_inited('pipe'):
+        if torch_parallel_context.is_first_in_pipeline_group():
+            dist.send(tmp, torch_parallel_context.get_next_global_rank('pipe'))
+        if torch_parallel_context.is_last_in_pipeline_group():
+            dist.recv(tmp, torch_parallel_context.get_prev_global_rank('pipe'))
+        torch.cuda.synchronize()
     dist.barrier()
     print("Finished test_comm --- ")
