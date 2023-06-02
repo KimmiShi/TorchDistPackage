@@ -251,6 +251,7 @@ class MoEDP(torch.nn.Module):
     def __init__(
         self,
         expert_params,
+        sync=True,
         bucket_cap_mb=25,
         gradient_as_bucket_view=False,
         process_group=None,
@@ -267,7 +268,7 @@ class MoEDP(torch.nn.Module):
 
         self.broadcast_params()
 
-        self.sync = False
+        self.sync = sync
         self.gradient_as_bucket_view = gradient_as_bucket_view
         self.bucket_cap_bytes = bucket_cap_mb * 1024 * 1024
         self.buckets = {}
@@ -395,13 +396,12 @@ class MoEDP(torch.nn.Module):
             return
 
         if self.sync:
-            for i, (name, param) in enumerate(self.module.named_parameters()):
+            for name, param in self.expert_params.items():
                 if (
-                    name not in self.parameters_to_ignore
-                    and param.requires_grad
+                    param.requires_grad
                     and param.grad is not None
                 ):
-                    if dist.get_world_size(self._get_group(name, param)) <= 1:
+                    if dist.get_world_size(self.group) <= 1:
                         continue
                     self.reduce_dispatch(name, param, i)
         else:
@@ -420,9 +420,9 @@ moe_dp_reduce_stream = torch.cuda.Stream()
 
 moe_dp_mod = None
 
-def create_moe_dp_hooks(params:dict, moe_dp_group, moe_dp_rank0, overlap_comm=True, reduce_op='avg'):
+def create_moe_dp_hooks(params:dict, moe_dp_group, moe_dp_rank0, overlap_comm=True, reduce_op='avg',sync=False):
     global moe_dp_mod
-    moe_dp_mod = MoEDP(params,process_group=moe_dp_group, dp_rank0=moe_dp_rank0,
+    moe_dp_mod = MoEDP(params, sync=sync, process_group=moe_dp_group, dp_rank0=moe_dp_rank0,
                        reduce_op=reduce_op, gradient_as_bucket_view=True,
                        num_grad_acc_iter=2)
     return moe_dp_mod
