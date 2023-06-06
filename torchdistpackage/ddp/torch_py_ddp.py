@@ -93,14 +93,17 @@ class PythonDDP(nn.Module):
             else:
                 return False
 
-    def __init__(self, module, process_group, async_reduction=True, buffer_size=2 ** 22):
+    def __init__(self, module, process_group, dp_rank0=0, async_reduction=True, buffer_size=2 ** 22):
         super(PythonDDP, self).__init__()
 
         self.module = module
         self.process_group = process_group
         self.world_size = dist.get_world_size(group=self.process_group)
         self.async_reduction = async_reduction
+        self.dp_rank0 = dp_rank0
+        self.parameters_to_ignore = []
 
+        self.broadcast_params()
         # Holds all_reduce handles, used when async_reduction is True
         self.async_handles = set()
 
@@ -115,6 +118,13 @@ class PythonDDP(nn.Module):
         for p in self.module.parameters():
             assert p.requires_grad
             p.register_hook(functools.partial(self._on_param_grad_ready, p))
+
+    def broadcast_params(self):
+        """ broadcast model parameters """
+        for name, param in self.module.state_dict().items():
+            if name not in self.parameters_to_ignore:
+                dist.broadcast(param, self.dp_rank0, group=self.process_group)
+
 
     def _build_buckets_for_params(self, max_buffer_size):
         """
