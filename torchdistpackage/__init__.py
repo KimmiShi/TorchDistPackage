@@ -1,4 +1,5 @@
 from .ddp.naive_ddp import NaiveDDP
+from .ddp.torch_py_ddp import PythonDDP
 
 from .dist.launch_from_slurm import setup_distributed_slurm
 
