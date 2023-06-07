@@ -218,7 +218,7 @@ class NaiveDDP(torch.nn.Module):
         #         handle.wait()
         #     self.async_handles.clear()
 
-        # torch.cuda.synchronize()
+        torch.cuda.synchronize()
         self.reduce_time += time.perf_counter() - beg
 
         self._reset_iter()
@@ -413,9 +413,7 @@ class MoEDP(torch.nn.Module):
         for key in self.grad_reduce_cnts:
             self.grad_reduce_cnts[key] = 0
 
-
-moe_dp_hooks = []
-moe_dp_reduce_stream = torch.cuda.Stream()
+        torch.cuda.synchronize()
 
 moe_dp_mod = None
 
@@ -423,11 +421,11 @@ def moe_dp_iter_step():
     global moe_dp_mod
     moe_dp_mod.reduce_gradients()
 
-def create_moe_dp_hooks(params:dict, moe_dp_group, moe_dp_rank0, overlap_comm=True, reduce_op='avg',sync=False):
+def create_moe_dp_hooks(params:dict, moe_dp_group, moe_dp_rank0, overlap_comm=True, reduce_op='avg', sync=False, num_grad_acc_iter=1):
     global moe_dp_mod
     moe_dp_mod = MoEDP(params, sync=sync, process_group=moe_dp_group, dp_rank0=moe_dp_rank0,
                        reduce_op=reduce_op, gradient_as_bucket_view=True,
-                       num_grad_acc_iter=2)
+                       num_grad_acc_iter=num_grad_acc_iter)
     return moe_dp_mod
 
 
