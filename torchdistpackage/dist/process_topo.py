@@ -120,11 +120,6 @@ class ProcessTopology(metaclass=SingletonMeta):
         # default: moe_expert_parallel group = DDP group
         dp_ranks_all = self._ranks_all['data']
 
-        if moe_dp_size <= 1:
-            self._groups['moe_ep'] = self._groups['data']
-            self._ranks_in_group['moe_ep'] = self._ranks_in_group['data']
-            return
-
         assert moe_dp_size <= self.get_dp_size()
         moe_ep_size = int(self.get_dp_size()//moe_dp_size)
         num_ep_groups = int(self.get_dp_size() // moe_ep_size)
