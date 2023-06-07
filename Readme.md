@@ -76,3 +76,8 @@ example: [TestNaiveDdp](./torchdistpackage/ddp/test_ddp.py)
 - pipeline model partition [流水并行模型切分](./torchdistpackage/parallel/pipeline_helper.py)
 
 [使用示例](./torchdistpackage/parallel/pipeline.md)
+
+## 4. MoE-数据并行
+在专家并行(Expert Parallel)的基础上，支持 MoE 数据并行：即复制一些expert，相同的expert之间做数据并行（初始参数广播，梯度平均），不同的expert之间做专家并行。
+
+[使用示例](./torchdistpackage/ddp/moe_dp.md)
