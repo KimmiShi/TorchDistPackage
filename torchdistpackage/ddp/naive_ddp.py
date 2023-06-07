@@ -218,7 +218,7 @@ class NaiveDDP(torch.nn.Module):
         #         handle.wait()
         #     self.async_handles.clear()
 
-        torch.cuda.synchronize()
+        # torch.cuda.synchronize()
         self.reduce_time += time.perf_counter() - beg
 
         self._reset_iter()
@@ -413,12 +413,15 @@ class MoEDP(torch.nn.Module):
         for key in self.grad_reduce_cnts:
             self.grad_reduce_cnts[key] = 0
 
-        torch.cuda.synchronize()
 
 moe_dp_hooks = []
 moe_dp_reduce_stream = torch.cuda.Stream()
 
 moe_dp_mod = None
+
+def moe_dp_iter_step():
+    global moe_dp_mod
+    moe_dp_mod.reduce_gradients()
 
 def create_moe_dp_hooks(params:dict, moe_dp_group, moe_dp_rank0, overlap_comm=True, reduce_op='avg',sync=False):
     global moe_dp_mod
@@ -426,37 +429,6 @@ def create_moe_dp_hooks(params:dict, moe_dp_group, moe_dp_rank0, overlap_comm=Tr
                        reduce_op=reduce_op, gradient_as_bucket_view=True,
                        num_grad_acc_iter=2)
     return moe_dp_mod
-    # global moe_dp_hooks
-    # global moe_dp_reduce_stream
-
-    # def _register_hooks(p, group):
-    #     if p.requires_grad and dist.get_world_size(group) > 1:
-    #         p_tmp = p.expand_as(p)
-    #         grad_acc = p_tmp.grad_fn.next_functions[0][0]
-
-    #         def reduce_grads(*notneeded):
-    #             if overlap_comm:
-    #                 stream = moe_dp_reduce_stream
-    #                 stream.wait_stream(torch.cuda.current_stream())
-    #             else:
-    #                 stream = torch.cuda.current_stream()
-
-    #             with torch.cuda.stream(stream):
-    #                 try:
-    #                     dist.all_reduce(
-    #                         p.grad, group=group, async_op=False, op=reduce_op
-    #                     )
-    #                 except Exception as e:
-    #                     import pdb
-    #                     pdb.set_trace()
-    #                     print("Exception at _reduce_grads")
-
-    #         grad_acc.register_hook(reduce_grads)
-    #         moe_dp_hooks.append(grad_acc)    # ! very important
-
-    # for param in param_list:
-    #     dist.broadcast(param, moe_dp_rank0, group=moe_dp_group)
-    #     _register_hooks(param, moe_dp_group)
 
 
 class GradBucket(object):
