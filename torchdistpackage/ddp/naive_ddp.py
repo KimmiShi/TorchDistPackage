@@ -90,7 +90,7 @@ class NaiveDDP(torch.nn.Module):
                 p_tmp = p.expand_as(p)
                 grad_acc = p_tmp.grad_fn.next_functions[0][0]
                 grad_acc.register_hook(self._make_hook(name, p, i))
-                self._grad_accs.append(grad_acc)    # ! very important
+                self._grad_accs.append(grad_acc)  # ! very important
 
     def _get_group(self, name, param):
         return self.group
@@ -229,6 +229,7 @@ class NaiveDDP(torch.nn.Module):
             if name not in self.parameters_to_ignore:
                 dist.broadcast(param, self.dp_rank0, group=self._get_group(name, param))
 
+
 class MoEDP(torch.nn.Module):
     r""" NaiveDDP wraps torch.nn.Module with distribued data parallel support
 
@@ -307,8 +308,7 @@ class MoEDP(torch.nn.Module):
                 p_tmp = p.expand_as(p)
                 grad_acc = p_tmp.grad_fn.next_functions[0][0]
                 grad_acc.register_hook(self._make_hook(name, p))
-                self._grad_accs.append(grad_acc)    # ! very important
-
+                self._grad_accs.append(grad_acc)  # ! very important
 
     def _reduce_grads(self, grad, group, name):
         if self.sync:
@@ -364,9 +364,7 @@ class MoEDP(torch.nn.Module):
                 p.grad_bucket = bucket
 
                 # launch a reduce every time a new tensor comes
-                self._reduce_grads(
-                    p.grad.data, self.group, "bucket_warmup"
-                )
+                self._reduce_grads(p.grad.data, self.group, "bucket_warmup")
 
                 # we should remove the full buckets from self to make sure that bucket is not resued?
                 #       not needed, since the bucket will be full, and will be replaced by next new bucket
@@ -397,10 +395,7 @@ class MoEDP(torch.nn.Module):
 
         if self.sync:
             for name, param in self.expert_params.items():
-                if (
-                    param.requires_grad
-                    and param.grad is not None
-                ):
+                if param.requires_grad and param.grad is not None:
                     if dist.get_world_size(self.group) <= 1:
                         continue
                     self.reduce_dispatch(name, param, i)
@@ -415,17 +410,34 @@ class MoEDP(torch.nn.Module):
 
         torch.cuda.synchronize()
 
+
 moe_dp_mod = None
+
 
 def moe_dp_iter_step():
     global moe_dp_mod
     moe_dp_mod.reduce_gradients()
 
-def create_moe_dp_hooks(params:dict, moe_dp_group, moe_dp_rank0, overlap_comm=True, reduce_op='avg', sync=False, num_grad_acc_iter=1):
+
+def create_moe_dp_hooks(
+    params: dict,
+    moe_dp_group,
+    moe_dp_rank0,
+    overlap_comm=True,
+    reduce_op="avg",
+    sync=False,
+    num_grad_acc_iter=1,
+):
     global moe_dp_mod
-    moe_dp_mod = MoEDP(params, sync=sync, process_group=moe_dp_group, dp_rank0=moe_dp_rank0,
-                       reduce_op=reduce_op, gradient_as_bucket_view=True,
-                       num_grad_acc_iter=num_grad_acc_iter)
+    moe_dp_mod = MoEDP(
+        params,
+        sync=sync,
+        process_group=moe_dp_group,
+        dp_rank0=moe_dp_rank0,
+        reduce_op=reduce_op,
+        gradient_as_bucket_view=True,
+        num_grad_acc_iter=num_grad_acc_iter,
+    )
     return moe_dp_mod
 
 
