@@ -115,13 +115,20 @@ class ProcessTopology(metaclass=SingletonMeta):
                 model_ranks = [dp_ranks[g] for dp_ranks in self._ranks_all['data']]
                 self._build_group("model", model_ranks)
 
-    def build_moe_groups(self, moe_dp_size=1):
+    def build_moe_groups(self, moe_dp_size=None, moe_ep_size=None):
         # build for moe: moe_data_parallel, moe_expert_parallel
         # default: moe_expert_parallel group = DDP group
         dp_ranks_all = self._ranks_all['data']
 
-        assert moe_dp_size <= self.get_dp_size()
-        moe_ep_size = int(self.get_dp_size()//moe_dp_size)
+        if moe_dp_size and not moe_ep_size:
+            moe_ep_size = int(self.get_dp_size()//moe_dp_size)
+        elif moe_ep_size and not moe_dp_size:
+            moe_dp_size = int(self.get_dp_size()//moe_ep_size)
+        elif moe_dp_size and moe_ep_size:
+            assert moe_dp_size*moe_ep_size == self.get_dp_size()
+        else:
+            print("invalid args: ", moe_dp_size, moe_ep_size)
+        print(f"MoE group config: moe_dp_size={moe_dp_size}, moe_ep_size={moe_ep_size}")
         num_ep_groups = int(self.get_dp_size() // moe_ep_size)
         num_dp_groups = int(self.get_dp_size() // moe_dp_size)
 
