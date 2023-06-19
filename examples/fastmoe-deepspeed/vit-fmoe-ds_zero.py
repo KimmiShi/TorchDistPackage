@@ -50,6 +50,8 @@ image_size = 196
 patch_size = 14
 batch_size = 512
 mask_ratio = 0.5
+
+
 for config in ['ff']:
     print(f"[config={config}, image_size={image_size}, patch_size={patch_size}, batch_size={batch_size}, mask_ratio={mask_ratio}]")
     # model = fordebug_onelayer_vit(config=config, image_size=image_size, patch_size=patch_size)
