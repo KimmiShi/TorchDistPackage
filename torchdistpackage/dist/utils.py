@@ -56,7 +56,7 @@ class NVTX_Context(object):
         self.exit_time = None
         self.record_time = record_time
         self.synchronize = False
-        
+
     def __enter__(self):
         torch.cuda.nvtx.range_push(self.context_name)
         if self.record_time:
@@ -69,7 +69,7 @@ class NVTX_Context(object):
             self.exit_time = time.time()
             print(f"{self.context_name} duration is {self.exit_time - self.start_time}")
         torch.cuda.nvtx.range_pop()
-    
+
 def _has_inf_or_nan(x, j=None):
     try:
         # if x is half, the .float() incurs an additional deep copy, but it's necessary if
@@ -89,3 +89,17 @@ def _has_inf_or_nan(x, j=None):
         if cpu_sum == float('inf') or cpu_sum == -float('inf') or cpu_sum != cpu_sum:
             return True
         return False
+
+def disable_non_master_print(is_master):
+    """
+    This function disables printing when not in master process
+    """
+    import builtins as __builtin__
+    builtin_print = __builtin__.print
+
+    def print(*args, **kwargs):
+        force = kwargs.pop('force', False)
+        if is_master or force:
+            builtin_print(*args, **kwargs)
+
+    __builtin__.print = print
