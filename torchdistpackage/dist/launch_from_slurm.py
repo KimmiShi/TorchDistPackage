@@ -18,6 +18,12 @@ def setup_distributed_slurm(backend="nccl", port=None):
     support both slurm and torch.distributed.launch
     see torch.distributed.init_process_group() for more details
     """
+
+    import os
+    import subprocess
+    import torch
+    import torch.distributed as dist
+
     num_gpus = torch.cuda.device_count()
 
     if "SLURM_JOB_ID" in os.environ:
