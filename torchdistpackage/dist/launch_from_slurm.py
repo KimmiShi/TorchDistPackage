@@ -30,10 +30,12 @@ def setup_distributed_slurm(backend="nccl", port=None):
         rank = int(os.environ["SLURM_PROCID"])
         world_size = int(os.environ["SLURM_NTASKS"])
         node_list = os.environ["SLURM_NODELIST"]
-        local_rank = rank % num_gpus
 
         addr = subprocess.getoutput(
             f"scontrol show hostname {node_list} | head -n1")
+        if "MASTER_ADDR" not in os.environ:
+            os.environ["MASTER_ADDR"] = addr
+
         # specify master port
         if port is not None:
             os.environ["MASTER_PORT"] = str(port)
@@ -42,9 +44,9 @@ def setup_distributed_slurm(backend="nccl", port=None):
             os.environ["MASTER_PORT"] = str(port)
         else:
             port = int(os.environ["MASTER_PORT"])
-        if "MASTER_ADDR" not in os.environ:
-            os.environ["MASTER_ADDR"] = addr
         os.environ["WORLD_SIZE"] = str(world_size)
+
+        local_rank = rank % num_gpus
         os.environ["LOCAL_RANK"] = str(local_rank)
         os.environ["RANK"] = str(rank)
     else:
