@@ -73,6 +73,7 @@ class Bf16ZeroOptimizer():
         self.master_weight_shard_groups = []
         self.bf16_param_id_in_partition = set()
         self.bf16_param_to_master_weight_map = dict()
+        self.param2rank = dict()
 
         self.param_async_reduced = []
 
@@ -84,6 +85,11 @@ class Bf16ZeroOptimizer():
             self.all_param_groups_partitions.append(all_partitions)
             params_in_cur_partition = all_partitions[self.partition_id]
             self.bit16_params_shard_groups.append(params_in_cur_partition)
+
+            # build param id to rank map
+            for rank, partition in enumerate(all_partitions):
+                for param in partition:
+                    self.param2rank[id(param)] = rank
 
             for param in params_in_cur_partition:
                 self.bf16_param_id_in_partition.add(id(param))
@@ -116,14 +122,18 @@ class Bf16ZeroOptimizer():
                         self.grad_accs.append(grad_acc)
                     wrapper(param, ind)
 
+
         # create hook that does reduce & remove grad
         def reduce_and_remove_grad(param):
             if self.num_partitions > 1:
                 self.reduce_stream.wait_stream(torch.cuda.current_stream())
+                dst_rank = 0
                 with torch.cuda.stream(self.reduce_stream):
-                    dist.all_reduce(
-                        param.grad.data, group=self.dp_group, async_op=False, op=self.reduce_op
-                    )
+                    # dist.all_reduce(
+                    #     param.grad.data, group=self.dp_group, async_op=False, op=self.reduce_op
+                    # )
+                    dst_rank = self.param2rank[id(param)]
+                    dist.reduce(param.grad.data, dst_rank, group=self.dp_group, async_op=False, op=self.reduce_op)
 
                     if id(param) in self.bf16_param_id_in_partition:
                         if not self.bf16_master_weights:
