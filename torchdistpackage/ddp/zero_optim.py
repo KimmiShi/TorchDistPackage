@@ -135,6 +135,7 @@ class Bf16ZeroOptimizer():
                     dst_rank = self.param2rank[id(param)]
                     dist.reduce(param.grad.data, dst_rank, group=self.dp_group, async_op=False, op=self.reduce_op)
 
+                    # copy to master if needed and free 16bit grad
                     if id(param) in self.bf16_param_id_in_partition:
                         if not self.bf16_master_weights:
                             master_weight = self.bf16_param_to_master_weight_map[id(param)]
@@ -142,16 +143,17 @@ class Bf16ZeroOptimizer():
                                 master_weight.grad = param.grad.clone().detach().to(master_weight.dtype)
                             else:
                                 master_weight.grad.data.copy_(param.grad.data)
+                            if self.partition_grad:
+                                # free 16bit grad
+                                param.grad = None
                     elif self.partition_grad:
-                        if self.overlap_comm:
-                            self.param_async_reduced.append(param)
-                        else:
-                            param.grad = None
-                        pass
+                        param.grad = None
+                        # if self.overlap_comm:
+                        #     self.param_async_reduced.append(param)
+                        # else:
+                        #     param.grad = None
 
-    # def backward(self, loss, retain_graph=False):
-    #     # run bwd prop
-    #     loss.backward(retain_graph=retain_graph)
+
 
     def sync_reduce_and_remove_grads(self):
         # finish gradient reduction
