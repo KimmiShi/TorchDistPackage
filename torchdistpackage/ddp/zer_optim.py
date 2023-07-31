@@ -90,6 +90,17 @@ class Bf16ZeroOptimizer():
 
             if bf16_master_weights:
                 self.master_weight_shard_groups.append(params_in_cur_partition)
+            else:
+                fp32_params_shard = [p.clone().detach().float() for p in params_in_cur_partition]
+
+                for ind in range(len(params_in_cur_partition)):
+                    self.bf16_param_to_master_weight_map[id(params_in_cur_partition[ind])] = fp32_params_shard[ind]
+                #in case the internal optimizer needs it
+                for p in fp32_params_shard:
+                    p.requires_grad = True
+
+                self.master_weight_shard_groups.append(fp32_params_shard)
+
 
             # update optim's param group
             param_group['params'] = self.master_weight_shard_groups[-1]
@@ -117,7 +128,10 @@ class Bf16ZeroOptimizer():
                     if id(param) in self.bf16_param_id_in_partition:
                         if not self.bf16_master_weights:
                             master_weight = self.bf16_param_to_master_weight_map[id(param)]
-                            master_weight.grad.data.copy_(param.grad.data)
+                            if master_weight.grad is None:
+                                master_weight.grad = param.grad.clone().detach().to(master_weight.dtype)
+                            else:
+                                master_weight.grad.data.copy_(param.grad.data)
                     elif self.partition_grad:
                         if self.overlap_comm:
                             self.param_async_reduced.append(param)
