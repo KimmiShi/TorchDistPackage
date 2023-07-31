@@ -42,11 +42,16 @@ def partition_params(params, num_partitions, numel_per_partition):
 
 
 class Bf16ZeroOptimizer():
-    def __init__(self, optim, dp_group=None, bf16_master_weights=False, overlap_comm=True) -> None:
+    """Usage:
+        1. wrap original optimizer:
+            `optimizer = Bf16ZeroOptimizer(optimizer, bf16_master_weights=True, overlap_comm=True)`
+        2. use wrapped optim like orignal one
+    """
+    def __init__(self, optim, dp_group=None, bf16_master_weights=False, overlap_comm=False, stage=2) -> None:
         self.optim = optim
         self.dp_group = dp_group
         self.bf16_master_weights = bf16_master_weights
-        # self.partition_grad = stage==2
+        self.partition_grad = stage==2
 
         self.grad_accs = []
         if torch.distributed.is_initialized():
@@ -57,7 +62,7 @@ class Bf16ZeroOptimizer():
             num_partitions = 1
         self.num_partitions = num_partitions
 
-        overlap_comm=overlap_comm
+        self.overlap_comm=overlap_comm
         self.reduce_stream = torch.cuda.Stream() if overlap_comm else torch.cuda.current_stream()
         self.reduce_op = dist.ReduceOp.AVG
 
@@ -68,6 +73,8 @@ class Bf16ZeroOptimizer():
         self.master_weight_shard_groups = []
         self.bf16_param_id_in_partition = set()
         self.bf16_param_to_master_weight_map = dict()
+
+        self.param_async_reduced = []
 
         for param_group in self.optim.param_groups:
             trainable_parameters = [param for param in param_group['params'] if param.requires_grad]
@@ -106,36 +113,52 @@ class Bf16ZeroOptimizer():
                     dist.all_reduce(
                         param.grad.data, group=self.dp_group, async_op=False, op=self.reduce_op
                     )
-                    param.reduced=True
+
                     if id(param) in self.bf16_param_id_in_partition:
                         if not self.bf16_master_weights:
                             master_weight = self.bf16_param_to_master_weight_map[id(param)]
                             master_weight.grad.data.copy_(param.grad.data)
-                    else:
-                        param.grad = None
+                    elif self.partition_grad:
+                        if self.overlap_comm:
+                            self.param_async_reduced.append(param)
+                        else:
+                            param.grad = None
+                        pass
+
+    # def backward(self, loss, retain_graph=False):
+    #     # run bwd prop
+    #     loss.backward(retain_graph=retain_graph)
+
+    def sync_reduce_and_remove_grads(self):
+        # finish gradient reduction
+        if self.overlap_comm:
+            torch.cuda.synchronize()
+
+        # clear reduced grads
+        if len(self.param_async_reduced) > 0:
+            for param in self.param_async_reduced:
+                param.grad = None
+        self.param_async_reduced = []
 
     def step(self):
-        # check grads
-        # for param_group in self.optim.param_groups:
-        #     for param in param_group['params']:
-        #         if id(param) in self.bf16_param_id_in_partition:
-        #             if param.grad is None:
-        #                 import pdb;pdb.set_trace()
-        #                 print('err')
-        #         else:
-        #             import pdb;pdb.set_trace()
-        #             print('err')
+        self.sync_reduce_and_remove_grads()
 
         # 1. param update of single partition
         self.optim.step()
 
+        # 2. relase master grad
+        if not self.bf16_master_weights:
+            for pg in self.master_weight_shard_groups:
+                for master_param in pg:
+                    master_param.grad=None
+
 
         # 2. update bf16 param with fp32 param in current partition
-        # if not self.bf16_master_weights:
-        #     for ind in range(len(self.bit16_params_shard_groups)):
-        #         # self.bit16_params_shard_groups[ind].data.copy_(self.master_weight_shard_groups[ind])
-        #         for param_ind in range(len(self.bit16_params_shard_groups[ind])):
-        #             self.bit16_params_shard_groups[ind][param_ind].data.copy_(self.master_weight_shard_groups[ind][param_ind])
+        if not self.bf16_master_weights:
+            for ind in range(len(self.bit16_params_shard_groups)):
+                # self.bit16_params_shard_groups[ind].data.copy_(self.master_weight_shard_groups[ind])
+                for param_ind in range(len(self.bit16_params_shard_groups[ind])):
+                    self.bit16_params_shard_groups[ind][param_ind].data.copy_(self.master_weight_shard_groups[ind][param_ind])
         # 3. all-gather bit16 params
         #    do this by broadcast
         if self.num_partitions ==1:
