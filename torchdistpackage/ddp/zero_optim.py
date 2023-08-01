@@ -100,6 +100,10 @@ class Bf16ZeroOptimizer():
         1. wrap original optimizer:
             `optimizer = Bf16ZeroOptimizer(optimizer, bf16_master_weights=True, overlap_comm=True)`
         2. use wrapped optim like orignal one
+
+       **Note**:
+            1. bf16_master_weights=True is not compatible with bucketize,
+                since bucketize requires an copy of master grad
     """
     def __init__(self, optim, dp_group=None, bf16_master_weights=False, overlap_comm=False, stage=2,
                  bucket_size=5e8, bucketize=True) -> None:
