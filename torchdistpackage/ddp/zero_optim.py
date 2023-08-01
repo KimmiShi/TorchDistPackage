@@ -40,6 +40,60 @@ def partition_params(params, num_partitions, numel_per_partition):
             elcnt=0
     return partitions
 
+FREE_BUFFERS = []
+
+class Bucket():
+    def __init__(self, dtype, size, reduce_stream, dp_group, reduce_op) -> None:
+        self.capacity = size
+        self.reduce_stream = reduce_stream#torch.cuda.Stream()
+        self.dp_group = dp_group
+        self.reduce_op = reduce_op
+        self.params_in_bucket = []
+        self.numel_in_bucket = 0
+
+        global FREE_BUFFERS
+        if len(FREE_BUFFERS) > 0:
+            self.buffer = FREE_BUFFERS.pop(0)
+        else:
+            self.buffer = torch.empty(self.capacity, dtype=dtype).cuda()
+
+    def try_hold(self, param, param_hook):
+        self.param_hook = param_hook
+        if param.grad.numel() > self.capacity - self.numel_in_bucket:
+            self.reduce()
+            return False
+        else:
+            self.push(param)
+            return True
+
+    def push(self, param):
+        self.params_in_bucket.append(param)
+        self.numel_in_bucket+=param.numel()
+
+    def reduce(self):
+        param_list = self.params_in_bucket
+        self.reduce_stream.wait_stream(torch.cuda.current_stream())
+        with torch.cuda.stream(self.reduce_stream):
+            pos = 0
+            for param in param_list:
+                slice = self.buffer.narrow(0, pos, param.grad.numel())
+                slice.copy_(param.grad.view(-1))
+                # set param.grad back to avoid copy after allreduce
+                param.grad = slice.view_as(param.grad)
+                pos+=param.grad.numel()
+            dist.all_reduce(
+                self.buffer, group=self.dp_group, async_op=False, op=self.reduce_op
+            )
+            pos=0
+            # copy reduced grads back, and do master grad update
+            for param in param_list:
+                self.param_hook(param)
+
+            # clean up
+            global FREE_BUFFERS
+            FREE_BUFFERS.append(self.buffer.zero_())
+            self.buffer = None
+
 
 class Bf16ZeroOptimizer():
     """Usage:
@@ -67,8 +121,6 @@ class Bf16ZeroOptimizer():
             num_partitions = 1
         self.num_partitions = num_partitions
 
-
-
         self.all_param_groups_partitions = []
         self.bit16_params_shard_groups = []
         self.master_weight_shard_groups = []
@@ -79,14 +131,18 @@ class Bf16ZeroOptimizer():
 
         self.num_buckets = 2
         self.original_dtype = optim.param_groups[0]['params'][0].dtype
-        self.grad_reduce_bucket = torch.empty(self.reduce_bucket_size, dtype=self.original_dtype).cuda()
-        def init_buckets():
-            self.tensors_in_buckets = [[] for _ in range(self.num_buckets)]
-            self.numel_in_buckets = [0 for _ in range(self.num_buckets)]
-            self.idle_bucket_idx = 0
-            self.bucket_reduce_finished = [True for _ in range(self.num_buckets)]
-        self.init_buckets = init_buckets
-        init_buckets()
+
+        self.working_bucket = self.create_bucket()
+        self.past_buckets = []
+        # self.grad_reduce_buckets = [torch.empty(self.reduce_bucket_size, dtype=self.original_dtype).cuda() for _ in range(self.num_buckets)]
+        # def init_buckets():
+        #     # self.grad_reduce_bucket.zero_()
+        #     self.tensors_in_buckets = [[] for _ in range(self.num_buckets)]
+        #     self.numel_in_buckets = [0 for _ in range(self.num_buckets)]
+        #     self.idle_bucket_idx = 0
+        #     self.bucket_reduce_finished = [True for _ in range(self.num_buckets)]
+        # self.init_buckets = init_buckets
+        # init_buckets()
         for param_group in self.optim.param_groups:
             trainable_parameters = [param for param in param_group['params'] if param.requires_grad]
             total_num_elements = sum([p.numel() for p in trainable_parameters])
@@ -133,7 +189,7 @@ class Bf16ZeroOptimizer():
                         self.grad_accs.append(grad_acc)
                     wrapper(param, ind)
 
-
+        print("Bf16ZeroOptimizer initialized.")
         # create hook that does reduce & remove grad
         def reduce_and_remove_grad(param):
             if self.num_partitions > 1:
@@ -147,27 +203,13 @@ class Bf16ZeroOptimizer():
                     dist.reduce(param.grad.data, dst_rank, group=self.dp_group, async_op=False, op=self.reduce_op)
 
                     self.copy2master_or_free(param)
-                    # # copy to master if needed and free 16bit grad
-                    # if id(param) in self.bf16_param_id_in_partition:
-                    #     if not self.bf16_master_weights:
-                    #         master_weight = self.bf16_param_to_master_weight_map[id(param)]
-                    #         if master_weight.grad is None:
-                    #             master_weight.grad = param.grad.clone().detach().to(master_weight.dtype)
-                    #         else:
-                    #             master_weight.grad.data.copy_(param.grad.data)
-                    #         if self.partition_grad:
-                    #             # free 16bit grad
-                    #             param.grad = None
-                    # elif self.partition_grad:
-                    #     param.grad = None
-                    #     # if self.overlap_comm:
-                    #     #     self.param_async_reduced.append(param)
-                    #     # else:
-                    #     #     param.grad = None
-
 
         def reduce_and_remove_grad_bucketized(param):
             self.bucket_reduce_helper(param)
+
+    def create_bucket(self):
+        return Bucket(self.original_dtype, self.reduce_bucket_size, self.reduce_stream,
+                      self.dp_group, self.reduce_op)
 
     def copy2master_or_free(self, param):
         # copy to master if needed and free 16bit grad
@@ -196,15 +238,14 @@ class Bf16ZeroOptimizer():
 
     @torch.no_grad()
     def reduce_bucket(self, idx):
-        self.bucket_reduce_finished[idx] = False
-        param_list = self.tensors_in_buckets[idx]
-        bucket = self.grad_reduce_bucket
         if self.overlap_comm:
             self.reduce_stream.wait_stream(torch.cuda.current_stream())
-        pos = 0
         with torch.cuda.stream(self.reduce_stream):
+            self.bucket_reduce_finished[idx] = False
+            param_list = self.tensors_in_buckets[idx]
+            bucket = self.grad_reduce_buckets[idx]
+            pos = 0
             for param in param_list:
-
                 slice = bucket.narrow(0, pos, param.grad.numel())
                 slice.copy_(param.grad.flatten())
                 pos+=param.grad.numel()
@@ -226,30 +267,57 @@ class Bf16ZeroOptimizer():
             # clear containers
             self.numel_in_buckets[idx] = 0
             self.tensors_in_buckets[idx] = []
+        # self.reduce_stream.synchronize()
+
+    def reduce_a_bucket(self, idx):
+        self.bucket_reduce_finished[idx] = False
+        param_list = self.tensors_in_buckets[idx]
+        bucket = self.grad_reduce_buckets[idx]
+        pos = 0
+        for param in param_list:
+            slice = bucket.narrow(0, pos, param.grad.numel())
+            slice.copy_(param.grad.flatten())
+            pos+=param.grad.numel()
+        dist.all_reduce(
+            bucket, group=self.dp_group, async_op=False, op=self.reduce_op
+        )
+        pos=0
+        # copy reduced grads back, and do master grad update
+        for param in param_list:
+            if param.grad is None:
+                import pdb;pdb.set_trace()
+                pass
+            slice = bucket.narrow(0, pos, param.grad.numel())
+            param.grad.copy_(slice.view(param.grad.shape))
+            pos+=param.grad.numel()
+            self.copy2master_or_free(param)
+
+        self.bucket_reduce_finished[idx] = True
+        # clear containers
+        self.numel_in_buckets[idx] = 0
+        self.tensors_in_buckets[idx] = []
 
     def bucket_reduce_helper(self, param):
         # for extra large param, just launch reduce
         if param.numel() > self.reduce_bucket_size:
             self.do_all_reduce(param)
-        # if bucket unable to hold, launch reduce
-        elif param.numel() + self.numel_in_buckets[self.idle_bucket_idx] > self.reduce_bucket_size:
-            # reduce current bucket
-            self.reduce_bucket(self.idle_bucket_idx)
-            # change idle bucket to next one
-            self.idle_bucket_idx = 1-self.idle_bucket_idx
-        if not self.bucket_reduce_finished[self.idle_bucket_idx]:
-            # wait
-            self.reduce_stream.synchronize()
-        # put param into bucket
-        self.tensors_in_buckets[self.idle_bucket_idx].append(param)
-        self.numel_in_buckets[self.idle_bucket_idx] += param.numel()
+        else:
+            if self.working_bucket.try_hold(param, self.copy2master_or_free):
+                pass
+            else:
+                # self.past_buckets.append(self.working_bucket)
+                self.working_bucket = self.create_bucket()
+                assert self.working_bucket.try_hold(param, self.copy2master_or_free)
+
 
     def finish_bucket(self):
-        for ind in range(self.num_buckets):
-            if len(self.tensors_in_buckets[ind]) > 0:
-                if self.bucket_reduce_finished[ind]:
-                    self.reduce_bucket(ind)
-
+        self.working_bucket.reduce()
+        # self.reduce_stream.synchronize()
+        # for ind in range(self.num_buckets):
+        #     if len(self.tensors_in_buckets[ind]) > 0:
+        #         if self.bucket_reduce_finished[ind]:
+        #             self.reduce_bucket(ind)
+        self.past_buckets = []
 
     def sync_reduce_and_remove_grads(self):
         # finish gradient reduction
@@ -295,7 +363,8 @@ class Bf16ZeroOptimizer():
                     dist.broadcast(param.data, partition_id, self.dp_group)
 
         # 4. clean up
-        self.init_buckets()
+        # self.init_buckets()
+        self.working_bucket = self.create_bucket()
 
     def zero_grad(self):
         # self.optim.zero_grad()
