@@ -1,5 +1,5 @@
 from .ddp.naive_ddp import NaiveDDP, moe_dp_iter_step, create_moe_dp_hooks
-from .ddp.zer_optim import Bf16ZeroOptimizer
+from .ddp.zero_optim import Bf16ZeroOptimizer
 
 # from .ddp.torch_py_ddp import PythonDDP
 
