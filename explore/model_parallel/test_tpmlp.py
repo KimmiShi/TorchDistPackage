@@ -15,8 +15,8 @@ def test_mlp(dim1=1024, in_feat=2048, outfeat=2048, hiddenfeat=8192):
     mlp = Mlp(in_feat, hiddenfeat, outfeat).cuda()
     tp_mlp = TpMlp(in_feat, hiddenfeat, outfeat).cuda()
 
-    tp_mlp.fc2.init_weight_from(mlp.fc2.weight)
-    tp_mlp.fc1.init_weight_from(mlp.fc1.weight)
+    tp_mlp.fc2.init_weight_from_full(mlp.fc2.weight)
+    tp_mlp.fc1.init_weight_from_full(mlp.fc1.weight)
 
     mlp_out = mlp(input)
 
