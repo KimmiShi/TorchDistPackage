@@ -52,6 +52,7 @@ class TpMlp(nn.Module):
             tp_group = None,
             bias=True,
             drop=0.,
+            sequence_parallel=True
     ):
         super().__init__()
         out_features = out_features or in_features
@@ -61,7 +62,7 @@ class TpMlp(nn.Module):
         set_tp_group(tp_group)
         self.fc1 = ColParallelLinear(in_features, hidden_features, bias=bias)
         self.act = act_layer()
-        self.fc2 = RowParallelLinear(hidden_features, out_features, bias=bias)
+        self.fc2 = RowParallelLinear(hidden_features, out_features, bias=bias, sequence_parallel=sequence_parallel)
         self.drop2 = nn.Dropout(drop)
 
     def forward(self, x):

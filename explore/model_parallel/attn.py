@@ -53,7 +53,7 @@ class Attention(nn.Module):
 
 class TpAttention(nn.Module):
     def __init__(self, dim, num_heads=8, qkv_bias=False, attn_drop=0., proj_drop=0.,
-                 tp_group = None):
+                 tp_group = None, sequence_parallel=True):
         super().__init__()
         assert dim % num_heads == 0, 'dim should be divisible by num_heads'
 
@@ -68,7 +68,7 @@ class TpAttention(nn.Module):
 
         self.attn_drop = nn.Dropout(attn_drop)
 
-        self.proj = RowParallelLinear(dim, dim)
+        self.proj = RowParallelLinear(dim, dim, sequence_parallel=sequence_parallel)
         self.proj_drop = nn.Dropout(proj_drop)
 
 
