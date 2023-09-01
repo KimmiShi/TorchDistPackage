@@ -1,10 +1,9 @@
 import torch
 from torch import nn as nn
-from torch.nn.parameter import Parameter
-from einops import rearrange
 
 
-from tp_utils import get_tp_group, set_tp_group, mylinear, RowParallelLinear, ColParallelLinear, _ReduceFromModelParallelRegion
+from .tp_utils import get_tp_group, set_tp_group, TpLinear, RowParallelLinear, ColParallelLinear, \
+    gather_from_sequence_parallel_region
 
 def _split_heads(tensor, num_heads, attn_head_size):
     """
@@ -22,10 +21,10 @@ class Attention(nn.Module):
         self.head_dim = dim // num_heads
         self.scale = self.head_dim ** -0.5
 
-        self.qkv = mylinear(dim, dim * 3, bias=qkv_bias)
+        self.qkv = TpLinear(dim, dim * 3, bias=qkv_bias)
 
         self.attn_drop = nn.Dropout(attn_drop)
-        self.proj = mylinear(dim, dim)
+        self.proj = TpLinear(dim, dim)
         self.proj_drop = nn.Dropout(proj_drop)
 
 
@@ -53,7 +52,7 @@ class Attention(nn.Module):
 
 class TpAttention(nn.Module):
     def __init__(self, dim, num_heads=8, qkv_bias=False, attn_drop=0., proj_drop=0.,
-                 tp_group = None):
+                 tp_group = None, sequence_parallel=False):
         super().__init__()
         assert dim % num_heads == 0, 'dim should be divisible by num_heads'
 
@@ -68,9 +67,9 @@ class TpAttention(nn.Module):
 
         self.attn_drop = nn.Dropout(attn_drop)
 
-        self.proj = RowParallelLinear(dim, dim)
+        self.proj = RowParallelLinear(dim, dim, sequence_parallel=sequence_parallel)
         self.proj_drop = nn.Dropout(proj_drop)
-
+        self.sequence_parallel = sequence_parallel
 
 
     def _naive_attn(self, x):
@@ -92,5 +91,9 @@ class TpAttention(nn.Module):
         return x
 
     def forward(self, x):
+        if self.sequence_parallel:
+            # assume input tensor is sequence parallel
+            x = gather_from_sequence_parallel_region(x)
+
         x = self._naive_attn(x)
         return x

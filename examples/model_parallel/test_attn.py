@@ -1,7 +1,7 @@
 import torch
 import torch.distributed as dist
 
-from attn import Attention,TpAttention
+from torchdistpackage.parallel import Attention,TpAttention
 
 from torchdistpackage import fix_rand, setup_distributed_slurm
 
@@ -32,8 +32,8 @@ def test_attn(nh=8, in_dim=1024, drop=0., seq_len=128):
         assert torch.allclose(out, tp_out)
         print("fwd passed")
 
-        out.sum().backward()
-        tp_out.sum().backward()
+        out.mean().backward()
+        tp_out.mean().backward()
 
         grad_out_buffer_2 = [torch.empty_like(tp_attn.proj.linear.weight.grad) for _ in range(dist.get_world_size())]
         dist.all_gather(grad_out_buffer_2, tp_attn.proj.linear.weight.grad)
