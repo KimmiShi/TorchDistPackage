@@ -3,10 +3,10 @@ from typing import Optional, Tuple, Union
 import torch
 from torch import nn as nn
 
-from attn import TpAttention,Attention
-from mlp import TpMlp,Mlp
+from .attn import TpAttention,Attention
+from .mlp import TpMlp,Mlp
 
-from tp_utils import _split_along_first_dim, gather_from_sequence_parallel_region
+from .tp_utils import set_sequence_parallel_attr, gather_from_sequence_parallel_region, maybe_split_into_sequence_parallel
 
 class Block(nn.Module):
     def __init__(self, dim, mlp_ratio=4,num_heads=8, **not_used):
@@ -46,41 +46,29 @@ class ParallelBlock(nn.Module):
         self.sequence_parallel = sequence_parallel
 
     def forward(self, hidden_states):
-        if self.sequence_parallel and not hasattr(hidden_states, 'sequence_parallel'):
-            hidden_states = _split_along_first_dim(hidden_states)
+        if self.sequence_parallel:
+            hidden_states = maybe_split_into_sequence_parallel(hidden_states)
 
         residual = hidden_states
         hidden_states = self.ln_1(hidden_states)
 
-
         # tp block: gather from seq-p and output seq-p
-        if self.sequence_parallel:
-            hidden_states = gather_from_sequence_parallel_region(hidden_states)
-
         attn_output = self.attn(
             hidden_states
         )
         # residual connection
         hidden_states = attn_output + residual
 
-        # import pdb;pdb.set_trace()
-        # if self.sequence_parallel:
-        #     hidden_states = _split_along_first_dim(hidden_states)
-
         residual = hidden_states
         hidden_states = self.ln_2(hidden_states)
 
         # tp block: gather from seq-p and output seq-p
-        if self.sequence_parallel:
-            hidden_states = gather_from_sequence_parallel_region(hidden_states)
-
         feed_forward_hidden_states = self.mlp(hidden_states)
         # residual connection
-        # import pdb;pdb.set_trace()
         hidden_states = residual + feed_forward_hidden_states
 
         if self.sequence_parallel:
-            setattr(hidden_states, "sequence_parallel", True)
+            set_sequence_parallel_attr(hidden_states)
         return hidden_states
 
     @torch.no_grad()

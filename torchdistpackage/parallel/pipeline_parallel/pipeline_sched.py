@@ -1,6 +1,6 @@
 import torch
 from torchdistpackage import tpc
-from torchdistpackage.parallel import comm
+from . import comm
 
 
 def _forward_step_in_forward_backward(

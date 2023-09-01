@@ -6,7 +6,7 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 
 import timm
 
-from torchdistpackage import setup_distributed_slurm, NaiveDDP
+from torchdistpackage import setup_distributed_slurm, NaiveDDP, fix_rand
 
 
 class MyModule(nn.Module):
@@ -28,8 +28,7 @@ def test_ddp(model, input_shape):
     model = model.cuda()
     model2 = copy.deepcopy(model)
 
-    # my_ddp_model = NaiveDDP(model, sync=True, gradient_as_bucket_view=False)
-    my_ddp_model = DistributedDataParallel(model, None, True, True)
+    my_ddp_model = NaiveDDP(model, sync=False, gradient_as_bucket_view=True)
     torch_ddp_model = DDP(model2, broadcast_buffers=False)
 
     optim = torch.optim.Adam(my_ddp_model.parameters(), lr=0.00015)
@@ -38,10 +37,11 @@ def test_ddp(model, input_shape):
     for i in range(10):
         # make sure initial param is equal
         for p1, p2 in zip(my_ddp_model.parameters(), torch_ddp_model.parameters()):
-            if (p1.data - p2.data).sum() > 1e-5:
+            if not torch.allclose(p1, p2):
+                import pdb;pdb.set_trace()
                 assert False, "model param not equal"
 
-        x = torch.rand(input_shape).cuda() + rank
+        x = torch.rand(input_shape).cuda()  # + rank （should make sure inputs are the same)
 
         optim.zero_grad()
         optim2.zero_grad()
@@ -86,7 +86,7 @@ def test_timm_vit():
     test_ddp(model, [4, 3, 224, 224])
 
 
-fix_random_seed()
+fix_rand()
 
 test_simple_module()
 test_timm_resnet()

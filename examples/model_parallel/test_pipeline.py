@@ -7,12 +7,9 @@ from typing import Tuple
 import torch
 from torch.utils.data import DataLoader, Dataset
 from torch.utils.data.distributed import DistributedSampler
-import subprocess
-import time
 
 from torchdistpackage import tpc, setup_distributed_slurm, test_comm
-from torchdistpackage.parallel.pipeline_helper import partition_uniform
-from torchdistpackage.parallel.pipeline_sched import forward_backward
+from torchdistpackage.parallel import partition_uniform, forward_backward
 
 
 class DummyClsDataset(Dataset):
@@ -42,7 +39,7 @@ def get_dataloaders(
     train_dataloader = DataLoader(
         dataset=train_data,
         batch_size=batch_size,
-        num_workers=0,  # multi-workers?
+        num_workers=0,
         pin_memory=True,
         sampler=sampler,
     )
@@ -98,10 +95,6 @@ def pp_fwd_fn(ins):
     return img_feat
 
 
-def pp_bwd_fn(output_obj):
-    output_obj.backward()
-
-
 def local_forward_backward(inp, model):
     inputs = []
     if tpc.is_first_in_pipeline_group():
@@ -110,7 +103,7 @@ def local_forward_backward(inp, model):
     forward_backward(
         optimizer,
         pp_fwd_fn,
-        pp_bwd_fn,
+        None,
         inputs,
         num_microbatches=NUM_MICRO_BATCHES,
         forward_only=False,

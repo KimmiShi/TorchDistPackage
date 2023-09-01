@@ -1,10 +1,9 @@
 import torch
 from torch import nn as nn
-from torch.nn.parameter import Parameter
 
-from tp_utils import get_tp_group, set_tp_group, TpLinear, RowParallelLinear, ColParallelLinear, \
+# from torchdistpackage.parallel import *
+from .tp_utils import get_tp_group, set_tp_group, TpLinear, RowParallelLinear, ColParallelLinear, \
     gather_from_sequence_parallel_region
-
 
 class Mlp(nn.Module):
     """ MLP as used in Vision Transformer, MLP-Mixer and related networks
@@ -53,7 +52,7 @@ class TpMlp(nn.Module):
             tp_group = None,
             bias=True,
             drop=0.,
-            sequence_parallel=True
+            sequence_parallel=False
     ):
         super().__init__()
         out_features = out_features or in_features
