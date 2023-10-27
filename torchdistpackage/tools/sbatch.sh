@@ -1,6 +1,6 @@
 #!/bin/bash
 
-#SBATCH --partition=INTERN2
+#SBATCH --partition=DEV
 #SBATCH --ntasks=16
 #SBATCH --nodes=2
 #SBATCH --cpus-per-task=8
