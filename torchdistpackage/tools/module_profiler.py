@@ -1,6 +1,16 @@
 import torch
 import time
 
+""" Usage:
+
+from torchdistpackage import report_prof, register_profile_hooks
+
+infos = register_profile_hooks(model)
+
+report_prof(infos, topn=-1, max_depth=4, min_mem=50)
+
+"""
+
 def get_dt_size(dtype):
     if dtype==torch.float:
         return 4
@@ -8,8 +18,11 @@ def get_dt_size(dtype):
         return 2
     elif dtype==torch.int8:
         return 8
+    elif dtype in [torch.int64,]:
+        return 8
     else:
         import pdb;pdb.set_trace()
+        return 0
         raise NotImplementedError
 
 def count_tensor_size(output):
@@ -17,7 +30,10 @@ def count_tensor_size(output):
         return output.numel()*get_dt_size(output.dtype)
     elif isinstance(output, (list, tuple)):
         return sum([count_tensor_size(t) for t in output])
+
     else:
+        # import pdb;pdb.set_trace()
+        return 0
         raise NotImplementedError
 
 def output_same_as_input(output, args):
@@ -70,32 +86,51 @@ def register_profile_hooks(model):
 
 
 def divide_by_layer(infos):
+    import re
     levels_map = {}
 
     def get_level(name):
-        return name.count('.')
+        dot_cnt = name.count('.')
+        postfix_cnt = len(re.findall('\.[0-9]\.', name)) + len(re.findall('\.[0-9]$', name))
+        return dot_cnt-postfix_cnt
 
     for k, v in infos.items():
         if k=='root':
             pass
-        else:
-            level = get_level(k)
+        elif isinstance(k, str):
+            try:
+                level = get_level(k)
+            except:
+                import pdb;pdb.set_trace()
+                pass
             if level not in levels_map:
                 levels_map[level] = {}
             levels_map[level][k] =v
+        else:
+            import pdb;pdb.set_trace()
+            pass
 
     return levels_map
 
-def sort_mem_time_ratio(infos, topn=20):
+def sort_mem_time_ratio(infos, topn=20, max_depth=5, min_mem=50):
     levels = divide_by_layer(infos)
     for l, metas in levels.items():
+        if l > max_depth:
+            break
         print("level:", l)
         mem_time_ratio = {}
         for name, time_mem in metas.items():
+            if time_mem['fwd_mem']<min_mem:
+                continue
             ratio = time_mem['fwd_mem']/time_mem['fwd_time']
+            ratio = ratio
             mem_time_ratio[name] = round(ratio, 3)
         sorted_list = sorted(mem_time_ratio.items(), key=lambda x:x[1], reverse=True)
-        print(sorted_list[:topn])
+        show_infos = []
+        for k, ratio in sorted_list[:topn]:
+            show_infos.append(f"{k}: MEM: {round(metas[k]['fwd_mem'])} MB; Time: {round(metas[k]['fwd_time'], 4)} ms")
+        for line in show_infos:
+            print(line)
 
 
 
@@ -139,4 +174,4 @@ def test():
 
     out = model(input)
 
-    sort_mem_time_ratio(infos)
+    report_prof(infos)
