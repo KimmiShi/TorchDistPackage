@@ -112,25 +112,29 @@ def divide_by_layer(infos):
 
     return levels_map
 
-def sort_mem_time_ratio(infos, topn=20, max_depth=5, min_mem=50):
+def sort_mem_time_ratio(infos, topn=20, max_depth=5, min_mem=50, sort=True):
     levels = divide_by_layer(infos)
     for l, metas in levels.items():
         if l > max_depth:
             break
-        print("level:", l)
-        mem_time_ratio = {}
-        for name, time_mem in metas.items():
-            if time_mem['fwd_mem']<min_mem:
-                continue
-            ratio = time_mem['fwd_mem']/time_mem['fwd_time']
-            ratio = ratio
-            mem_time_ratio[name] = round(ratio, 3)
-        sorted_list = sorted(mem_time_ratio.items(), key=lambda x:x[1], reverse=True)
-        show_infos = []
-        for k, ratio in sorted_list[:topn]:
-            show_infos.append(f"{k}: MEM: {round(metas[k]['fwd_mem'])} MB; Time: {round(metas[k]['fwd_time'], 4)} ms")
-        for line in show_infos:
-            print(line)
+        print("\nlevel:", l)
+        if not sort:
+            for k, time_mem in metas.items():
+                print(f"{k}: MEM: {round(metas[k]['fwd_mem'])} MB; Time: {round(metas[k]['fwd_time'], 4)} ms")
+        else:
+            mem_time_ratio = {}
+            for name, time_mem in metas.items():
+                if time_mem['fwd_mem']<min_mem:
+                    continue
+                ratio = time_mem['fwd_mem']/time_mem['fwd_time']
+                ratio = ratio
+                mem_time_ratio[name] = round(ratio, 3)
+            sorted_list = sorted(mem_time_ratio.items(), key=lambda x:x[1], reverse=True)
+            show_infos = []
+            for k, ratio in sorted_list[:topn]:
+                show_infos.append(f"{k}: MEM: {round(metas[k]['fwd_mem'])} MB; Time: {round(metas[k]['fwd_time'], 4)} ms")
+            for line in show_infos:
+                print(line)
 
 
 
