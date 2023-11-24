@@ -88,3 +88,7 @@ example: [TestNaiveDdp](./torchdistpackage/ddp/test_ddp.py)
 简单的TP实现。
 
 [测例参考](./examples/model_parallel/test_transformer.py)
+
+## 6. model profiler
+分级时间和显存消耗
+[参考](./torchdistpackage/tools/module_profile.md)
