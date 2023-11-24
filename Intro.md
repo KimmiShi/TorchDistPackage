@@ -64,3 +64,16 @@ dist_config = [('data',world_size/(2*pp_size)), ('pipe',pp_size), ('tensor',2)]
 使用例子可以参考 [pipeline scheduler 测试代码](./torchdistpackage/parallel/test_pipeline.py)
 
 > 目前仅迁移了1F1B调度器
+
+
+## 加速ZeRO多卡训练速度
+
+facts:
+1. 随着卡数增加，zero的通信开销越来越大
+2. 超过一定卡数后，卡数继续增加，zero对显存的削减作用变小
+
+举个例子，例如opt_state=40GB; 8卡的时候每张卡5GB；32卡的时候每张卡1.xGB，对于80GB级别的显卡来说，省下的这4GB显存无关痛痒，但由于通信跨节点了，zero最后一步all-gather(或者broadcast)会变慢很多，尤其是只有一两个IB的机器。
+
+所以解决方案是：只在节点内做ZeRO。
+
+目前提供了[ZeRO1的实现](./torchdistpackage/dist/node_group.py)。
