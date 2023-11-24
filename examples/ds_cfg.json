@@ -1,0 +1,12 @@
+"train_micro_batch_size_per_gpu": 2,
+"zero_optimization": {
+    "stage": 2,
+    "allgather_bucket_size": 5e8,
+    "overlap_comm": true,
+    "reduce_bucket_size": 5e8,
+    "contiguous_gradients": true,
+    "reduce_scatter": true,
+},
+"fp16": {
+    "enabled": false,
+},

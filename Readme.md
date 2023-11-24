@@ -89,6 +89,13 @@ example: [TestNaiveDdp](./torchdistpackage/ddp/test_ddp.py)
 
 [测例参考](./examples/model_parallel/test_transformer.py)
 
-## 6. model profiler
+## 6. Hybrid ZeRO / 节点内ZeRO - 加速ZeRO多卡训练速度
+
+详见[主要特性介绍](./Intro.md)
+
+
+# TOOLS 工具类
+## 1. model profiler
 分级时间和显存消耗
 [参考](./torchdistpackage/tools/module_profile.md)
+
