@@ -22,9 +22,9 @@
 
 # module profile： 以module为粒度统计时间和显存开销，指导grad checkpointing
 
-这里推荐使用 [torchdistpackage.get_model_profile](../../torchdistpackage/tools/module_profile.md)
+介绍：`torchdistpackage.get_model_profile`
 
-[测例用法](./test_profile.py)参考
+[测例用法参考](../../examples/profile/test_profile.py)
 
 优点：
 - 分层级打印submodule的时间和显存消耗
