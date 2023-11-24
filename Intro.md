@@ -66,7 +66,7 @@ dist_config = [('data',world_size/(2*pp_size)), ('pipe',pp_size), ('tensor',2)]
 > 目前仅迁移了1F1B调度器
 
 
-## 加速ZeRO多卡训练速度
+## 3. 加速ZeRO多卡训练速度
 
 facts:
 1. 随着卡数增加，zero的通信开销越来越大
