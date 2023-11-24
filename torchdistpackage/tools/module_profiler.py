@@ -1,5 +1,9 @@
 import torch
+
 import time
+import re
+
+
 
 """ Usage:
 
@@ -45,6 +49,12 @@ def output_same_as_input(output, args):
     else:
         return False
 
+def get_level(name):
+    if name=="root":
+        return 0
+    dot_cnt = name.count('.')
+    postfix_cnt = len(re.findall('\.[0-9]\.', name)) + len(re.findall('\.[0-9]$', name))
+    return dot_cnt-postfix_cnt+1
 
 # register_forward_pre_hook
 @torch.no_grad()
@@ -75,8 +85,7 @@ def fwd_hook_wrapper(module_name='root', infos={}):
 
     return end_fwd_profile
 
-def register_profile_hooks(model):
-    infos={}
+def register_profile_hooks(model,infos={}):
     for name, module in model.named_modules():
         if name=='':
             name = 'root'
@@ -86,17 +95,11 @@ def register_profile_hooks(model):
 
 
 def divide_by_layer(infos):
-    import re
     levels_map = {}
-
-    def get_level(name):
-        dot_cnt = name.count('.')
-        postfix_cnt = len(re.findall('\.[0-9]\.', name)) + len(re.findall('\.[0-9]$', name))
-        return dot_cnt-postfix_cnt
-
     for k, v in infos.items():
         if k=='root':
-            pass
+            level = 0
+            levels_map[level] = {k:v}
         elif isinstance(k, str):
             try:
                 level = get_level(k)
@@ -140,42 +143,30 @@ def sort_mem_time_ratio(infos, topn=20, max_depth=5, min_mem=50, sort=True):
 
 report_prof = sort_mem_time_ratio
 
-def test():
-    from torchvision.models import resnet18
-    class FFNNET(torch.nn.Module):
-        def __init__(self, indim, outdim):
-            super().__init__()
-            hidden_dim=4*indim
-            LoRACompatibleLinear=torch.nn.Linear
-            self.fc1 = LoRACompatibleLinear(indim, hidden_dim)
-            self.fc2 = LoRACompatibleLinear(hidden_dim, outdim)
+def get_model_profile(model, args: tuple, kwargs={}, sort=True, topn=20, max_depth=5, min_mem=50):
+    """run the model and print the TIME & GPU MEM consumption
 
-            self.indim = indim
-            self.outdim = outdim
-            self.hidden_dim = hidden_dim
+    Args:
+        model (torch.nn.Module): the model to run
+        args (tuple): the model input tensors
+        kwargs (dict, optional): model input kwargs. Defaults to {}.
+        sort (bool, optional): sort the print sequence by mem/time or not. If False, ALL modules' info will be printed. Defaults to True.
+        topn (int, optional): how many module to print if sort is True. Defaults to 20.
+        max_depth (int, optional): the max depth of module to print. Defaults to 5.
+        min_mem (int, optional): memory consumption low than min_mem MB will be ignored. Defaults to 50.
 
-        # def set_lora(self):
-        #     self.fc1.requires_grad_(False)
-        #     self.fc2.requires_grad_(False)
-        #     self.fc1_lora = LoRALinearLayer(self.indim, self.hidden_dim, device='cuda')
-        #     self.fc2_lora = LoRALinearLayer(self.hidden_dim, self.outdim, device='cuda')
+    Returns:
+        dict: all the modules and their memory and time statistics
+    """
+    # wamup
+    _ = model(*args, **kwargs)
 
-        #     self.fc1.set_lora_layer(self.fc1_lora)
-        #     self.fc2.set_lora_layer(self.fc2_lora)
-
-        def forward(self, x):
-            x =self.fc1(x)
-            x=self.fc2(x)
-            return x
-
-    model = resnet18().cuda()
-    input=torch.rand(64,3,224,224, device='cuda')
-
-    model(input)
-    model(input)
+    torch.cuda.synchronize()
 
     infos = register_profile_hooks(model)
 
-    out = model(input)
+    out = model(*args, **kwargs)
 
-    report_prof(infos)
+    report_prof(infos, sort=sort, topn=topn, max_depth=max_depth, min_mem=min_mem)
+
+    return infos

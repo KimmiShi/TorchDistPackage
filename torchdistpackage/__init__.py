@@ -10,4 +10,4 @@ from .dist.process_topo import test_comm, is_using_pp
 
 from .utils import fix_rand
 
-from .tools.module_profiler import report_prof, register_profile_hooks
+from .tools.module_profiler import report_prof, register_profile_hooks, get_model_profile
