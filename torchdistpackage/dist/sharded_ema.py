@@ -12,7 +12,7 @@ class ShardedEMA():
         # divide param in buckets
         self.all_param_shards = partition_params(model, dist.get_world_size(group), return_dict=True)
         self.param_shard = {}
-
+        #import pdb;pdb.set_trace()
         for name, p in self.all_param_shards[self.rank].items():
             self.param_shard[name] = p.clone().detach().requires_grad_(False)
 
@@ -28,12 +28,11 @@ class ShardedEMA():
         return self.param_shard
 
     def summon_full_cpu(self):
-        # communicate to rank0
+        
+        state_dict = {}
         for name, val in self.param_shard.items():
-            # self.param_shard[name] = val.cpu()
             if self.rank==0:
-                self.all_param_shards[0][name] = val.cpu()
-
+                state_dict[name] = val.cpu()
 
         for rank in range(1, len(self.all_param_shards)):
             # send from rank to rank0
@@ -41,14 +40,16 @@ class ShardedEMA():
             for param_name in params_in_cur_rank.keys():
                 if self.rank == rank:
                     src_p = self.param_shard[param_name]
-                    dist.send(src_p, 0, self.group)
+                    dist.send(src_p.cuda(), 0, self.group)
+                    #print(f"send {param_name} from rank {rank} to 0")
                 if self.rank == 0:
                     recv_buffer = torch.empty_like(self.all_param_shards[rank][param_name])
-                    dist.recv(recv_buffer ,rank, self.group)
-                    self.all_param_shards[rank][param_name] = recv_buffer.cpu()
+                    dist.recv(recv_buffer, rank, self.group)
+                    #print(f"rank0 recv {param_name} from rank {rank}")
+                    state_dict[param_name] = recv_buffer.cpu()
+                dist.barrier()
 
-        state_dict = {}
-        for params in self.all_param_shards:
-            for name, param in params.items():
-                state_dict[name] = param
+        for name, param in state_dict.items():
+            if param.device != torch.device('cpu'):
+                import pdb;pdb.set_trace()    
         return state_dict

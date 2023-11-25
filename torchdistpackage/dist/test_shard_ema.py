@@ -4,7 +4,9 @@ from collections import OrderedDict
 
 from sharded_ema import ShardedEMA
 
-from torchdistpackage import setup_distributed_slurm, test_comm
+from torchdistpackage import setup_distributed_slurm, test_comm, fix_rand
+
+fix_rand()
 
 @torch.no_grad()
 def update_params(model):
@@ -28,9 +30,6 @@ def update_ema(ema_model, model, decay=0.9999):
 
 
 def test_ema(model):
-    setup_distributed_slurm()
-    test_comm()
-
     ema = deepcopy(model)
     ema.requires_grad_(False)
 
@@ -47,13 +46,19 @@ def test_ema(model):
 
     sd_ema_params = sd_ema.summon_full_cpu()
 
-    for name, gt_param in ema.named_parameters():
-        sd_param = sd_ema_params[name]
-        assert torch.equal(gt_param.cpu(), sd_param)
+    if torch.distributed.get_rank()==0:
+        for name, gt_param in ema.named_parameters():
+            sd_param = sd_ema_params[name]
+            if not torch.equal(gt_param.cpu(), sd_param):
+                print(name, (gt_param.cpu()-sd_param).sum())
+            assert torch.equal(gt_param.cpu(), sd_param)
 
     print("=========== test passed ===========")
 
 import torchvision.models as models
+
+setup_distributed_slurm()
+test_comm()
 
 model = models.resnet50().cuda()
 

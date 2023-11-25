@@ -277,7 +277,8 @@ def test_comm():
             if dist.get_rank() == rank:
                 dist.send(tmp, 0)
             if dist.get_rank() == 0:
-                dist.recv(tmp, 1)
+                dist.recv(tmp, rank)
+            dist.barrier()
         dist.barrier()
         print('passed: send-recv to rank0')
 
