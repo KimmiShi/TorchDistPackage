@@ -94,6 +94,9 @@ example: [TestNaiveDdp](./torchdistpackage/ddp/test_ddp.py)
 详见[主要特性介绍](./Intro.md)
 
 
+## 7. 分片EMA - sharded EMA
+节省EMA的显存消耗，见[sharded ema example](./examples/test_shard_ema.py)
+
 # TOOLS 工具类
 ## 1. model profiler
 分级时间和显存消耗
