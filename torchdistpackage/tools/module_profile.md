@@ -20,6 +20,19 @@
 
 如果有一些自定义的kernel，flops比较大不想漏掉，可以通过相同的方式来patch。
 
+
+用法：
+
+```py
+from deepspeed.profiling.flops_profiler import get_model_profile
+flops, macs, params = get_model_profile(model=model,
+                                input_shape=(32, 1280, 1280),
+                                print_profile=True,
+                                detailed=True,
+                                warm_up=3,)
+
+```
+
 # module profile： 以module为粒度统计时间和显存开销，指导grad checkpointing
 
 介绍：`torchdistpackage.get_model_profile`

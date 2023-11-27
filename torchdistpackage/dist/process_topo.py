@@ -269,16 +269,31 @@ def test_comm():
     tmp = torch.rand([100,1024]).cuda()
     torch.cuda.synchronize()
     dist.all_reduce(tmp, group=None)
+    dist.barrier()
+    print('passed: all_reduce')
+
+    if dist.get_world_size()>1:
+        for rank in range(1, dist.get_world_size()):
+            if dist.get_rank() == rank:
+                dist.send(tmp, 0)
+            if dist.get_rank() == 0:
+                dist.recv(tmp, rank)
+            dist.barrier()
+        dist.barrier()
+        print('passed: send-recv to rank0')
+
+
     for mode in ['data', 'tensor', 'pipe', 'model', 'moe_dp', 'moe_ep']:
         if torch_parallel_context.is_mode_inited(mode):
             dist.all_reduce(tmp, group=torch_parallel_context.get_group(mode))
             torch.cuda.synchronize()
-        print('passed:', mode)
+            print('passed:', mode)
 
     len_dl_tensor = torch.tensor([0], dtype=torch.long).cuda()
-    if torch_parallel_context.is_first_in_group('model'):
-        len_dl = 10
-        len_dl_tensor = torch.tensor([len_dl], dtype=torch.long).cuda()
+    if torch_parallel_context.is_mode_inited(mode):
+        if torch_parallel_context.is_first_in_group('model'):
+            len_dl = 10
+            len_dl_tensor = torch.tensor([len_dl], dtype=torch.long).cuda()
 
     dist.broadcast(len_dl_tensor,0)
 
