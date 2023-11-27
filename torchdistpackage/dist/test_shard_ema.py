@@ -2,7 +2,7 @@ import torch
 from copy import deepcopy
 from collections import OrderedDict
 
-from sharded_ema import ShardedEMA
+from torchdistpackage import ShardedEMA
 
 from torchdistpackage import setup_distributed_slurm, test_comm, fix_rand
 
@@ -44,7 +44,7 @@ def test_ema(model):
 
     # compare
 
-    sd_ema_params = sd_ema.summon_full_cpu()
+    sd_ema_params = sd_ema.state_dict_cpu()
 
     if torch.distributed.get_rank()==0:
         for name, gt_param in ema.named_parameters():

@@ -1,35 +1,43 @@
+from collections import OrderedDict
+import time
+
 import torch
 import torch.distributed as dist
-from collections import OrderedDict
+from torch.nn.parallel import DistributedDataParallel as DDP
 
 from torchdistpackage.utils import partition_params
 
 class ShardedEMA():
     def __init__(self, model, group=None) -> None:
         self.rank = dist.get_rank(group)
-        # self.cpu_group = dist.new_group(backend='gloo')
         self.group = group
         # divide param in buckets
         self.all_param_shards = partition_params(model, dist.get_world_size(group), return_dict=True)
         self.param_shard = {}
-        #import pdb;pdb.set_trace()
+        self.named_buffers = {}
         for name, p in self.all_param_shards[self.rank].items():
             self.param_shard[name] = p.clone().detach().requires_grad_(False)
 
     @torch.no_grad()
     def update(self, model, decay=0.9999, only_trainable=True):
+        if isinstance(model, DDP):
+            model = model.module
         model_params = OrderedDict(model.named_parameters())
         for name in self.param_shard.keys():
             if only_trainable and (not model_params[name].requires_grad):
                 continue
             self.param_shard[name].mul_(decay).add_(model_params[name].data, alpha=1 - decay)
 
+        self.named_buffers = model.named_buffers()
+
     def state_dict_shard(self):
         return self.param_shard
 
-    def summon_full_cpu(self):
-        
-        state_dict = {}
+    def state_dict_cpu(self):
+        begin = time.time()
+        state_dict = OrderedDict(self.named_buffers)
+        for k in state_dict.keys():
+            state_dict[k] = state_dict[k].cpu()
         for name, val in self.param_shard.items():
             if self.rank==0:
                 state_dict[name] = val.cpu()
@@ -49,7 +57,14 @@ class ShardedEMA():
                     state_dict[param_name] = recv_buffer.cpu()
                 dist.barrier()
 
-        for name, param in state_dict.items():
-            if param.device != torch.device('cpu'):
-                import pdb;pdb.set_trace()    
+        print(f"ShardedEMA state_dict_cpu time cost: {time.time()-begin} s")
         return state_dict
+
+    def verify_with_gt(self, gt_ema):
+        sd_ema_params = self.state_dict_cpu()
+        if torch.distributed.get_rank()==0:
+            for name, gt_param in gt_ema.named_parameters():
+                sd_param = sd_ema_params[name]
+                if not torch.equal(gt_param.cpu(), sd_param):
+                    print(f"param {name} not equal, diff: ", (gt_param.cpu()-sd_param).sum())
+                assert torch.equal(gt_param.cpu(), sd_param)
