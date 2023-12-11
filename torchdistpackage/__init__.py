@@ -11,7 +11,7 @@ from .dist.node_group import setup_node_groups
 from .dist.sharded_ema import ShardedEMA
 
 
-from .utils import fix_rand
+from .utils import fix_rand, sliced_run
 
 from .tools.module_profiler import report_prof, register_profile_hooks, get_model_profile
 
