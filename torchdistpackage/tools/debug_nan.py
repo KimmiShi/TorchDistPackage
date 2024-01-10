@@ -25,7 +25,7 @@ def check_model_params(model):
     for name,param in model.named_parameters():
         if not check_tensor_inf_nan(param):
             print("model param:", name, " contains nan/inf!")
-            import pdb;pdb.set_trace()
+            # import pdb;pdb.set_trace()
             return False
 
 # register_forward_hook
@@ -35,7 +35,7 @@ def fwd_hook_wrapper(module_name=''):
         if not check_tensors(args):
             print(module_name, "input contains nan/inf!")
         if not check_tensors(output):
-            import pdb;pdb.set_trace()
+            # import pdb;pdb.set_trace()
             print(module_name, "output contains nan/inf!")
 
 
@@ -48,14 +48,16 @@ def bwd_hook_wrapper(module_name=''):
             print(module_name, "grad_output contains nan/inf!")
         if not check_tensors(grad_input):
             print(module_name, "grad_input contains nan/inf!")
-            import pdb;pdb.set_trace()
+            # import pdb;pdb.set_trace()
     return check_value
 
 # detect param update nan
 
-# usage example:
-    # fwd_hooks = {}
-    # bwd_hooks = {}
-    # for name, module in model.named_modules():
-    #     fwd_hooks[name] = module.register_forward_hook(fwd_hook_wrapper(name))
-    #     bwd_hooks[name] = module.register_forward_hook(bwd_hook_wrapper(name))
+def register_abnormal_val_hooks(model):
+    fwd_hooks = {}
+    bwd_hooks = {}
+    for name, module in model.named_modules():
+        fwd_hooks[name] = module.register_forward_hook(fwd_hook_wrapper(name))
+        bwd_hooks[name] = module.register_forward_hook(bwd_hook_wrapper(name))
+    return fwd_hooks, bwd_hooks
+

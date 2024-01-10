@@ -1,6 +1,5 @@
 import torch
 import functools
-from bitsandbytes.nn import Linear8bitLt
 
 from .module_replace import replace_all_module
 
@@ -8,6 +7,8 @@ def if_replace_linear(name, module):
     return isinstance(module, (torch.nn.Linear))
 
 def get_new_module(name, module, bnb_kwargs={}):
+    from bitsandbytes.nn import Linear8bitLt
+
     old_shape = module.weight.shape
     indim = old_shape[1]
     outdim = old_shape[0]
