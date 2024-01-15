@@ -63,3 +63,24 @@ def partition_params(model, num_partitions, return_dict=False):
             partition_id+=1
             elcnt=0
     return partitions
+
+def sliced_run(fn, input: torch.Tensor, micro_bs):
+    """slice the input into several micro batches and run forward, with no_grad
+
+    Args:
+        fn (function): forward function
+        input (torch.Tensor): tensor
+        micro_bs (integer): micro batchsize
+
+    Returns:
+        tensor
+    """
+    chunk_outs = []
+    with torch.no_grad():
+        chunks = input.split(micro_bs, 0)
+        for chunk in chunks:
+            chunk_out = fn(chunk)
+            chunk_outs.append(chunk_out)
+
+        out = torch.cat(chunk_outs, dim=0)
+    return out
