@@ -36,17 +36,19 @@ class Attention(nn.Module):
         q= _split_heads(q, self.num_heads, self.head_dim)
         k= _split_heads(k, self.num_heads, self.head_dim)
         v= _split_heads(v, self.num_heads, self.head_dim)
+        # (b, nh, s, hdim)
 
         attn = ((q * self.scale) @ k.transpose(-2, -1))
+        # (b, nh, s, s)
         attn = attn.softmax(dim=-1)
         attn = self.attn_drop(attn)
         x = (attn @ v).transpose(1, 2).reshape(B, N, DIM)
         x = self.proj(x)
-        x = self.proj_drop(x)
         return x
 
     def forward(self, x):
         x = self._naive_attn(x)
+        x = self.proj_drop(x)
         return x
 
 
@@ -80,14 +82,13 @@ class TpAttention(nn.Module):
         q= _split_heads(q, self.head_num_per_partition, self.head_dim)
         k= _split_heads(k, self.head_num_per_partition, self.head_dim)
         v= _split_heads(v, self.head_num_per_partition, self.head_dim)
-
+        # (b, nh_per, s, hdim)
 
         attn = ((q * self.scale) @ k.transpose(-2, -1))
         attn = attn.softmax(dim=-1)
         attn = self.attn_drop(attn)
         x = (attn @ v).transpose(1, 2).reshape(B, N, DIM//self.tp_size)
         x = self.proj(x)
-        x = self.proj_drop(x)
         return x
 
     def forward(self, x):
@@ -96,4 +97,7 @@ class TpAttention(nn.Module):
             x = gather_from_sequence_parallel_region(x)
 
         x = self._naive_attn(x)
+
+        x = self.proj_drop(x)
+
         return x

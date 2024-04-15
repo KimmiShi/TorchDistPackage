@@ -24,6 +24,8 @@ def setup_distributed_slurm(backend="nccl", port=None):
     import torch
     import torch.distributed as dist
 
+    if dist.is_initialized():
+        return None
     num_gpus = torch.cuda.device_count()
 
     if "SLURM_JOB_ID" in os.environ:
