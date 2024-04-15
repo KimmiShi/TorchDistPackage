@@ -46,8 +46,8 @@ class ParallelBlock(nn.Module):
         self.sequence_parallel = sequence_parallel
 
     def forward(self, hidden_states):
-        if self.sequence_parallel:
-            hidden_states = maybe_split_into_sequence_parallel(hidden_states)
+        # if self.sequence_parallel:
+        #     hidden_states = maybe_split_into_sequence_parallel(hidden_states)
 
         residual = hidden_states
         hidden_states = self.ln_1(hidden_states)
@@ -67,8 +67,8 @@ class ParallelBlock(nn.Module):
         # residual connection
         hidden_states = residual + feed_forward_hidden_states
 
-        if self.sequence_parallel:
-            set_sequence_parallel_attr(hidden_states)
+        # if self.sequence_parallel:
+        #     set_sequence_parallel_attr(hidden_states)
         return hidden_states
 
     @torch.no_grad()
@@ -93,6 +93,8 @@ class Transformer(nn.Module):
         self.sequence_parallel = sequence_parallel
 
     def forward(self, x):
+        if self.sequence_parallel:
+            x = maybe_split_into_sequence_parallel(x)
         for blk in self.blocks:
             x = blk(x)
         if self.sequence_parallel:

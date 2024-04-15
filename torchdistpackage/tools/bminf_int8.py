@@ -1,13 +1,13 @@
 import torch
 
-import bminf
-
 from .module_replace import replace_all_module
 
 def if_replace_linear(name, module):
     return isinstance(module, (torch.nn.Linear))
 
 def get_new_module(name, module):
+    import bminf
+
     new_linear = bminf.QuantizedLinear(module)
     return new_linear
 
