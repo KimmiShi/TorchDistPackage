@@ -16,5 +16,9 @@ from .utils import fix_rand
 from .tools.module_profiler import report_prof, register_profile_hooks, get_model_profile
 
 from .tools.module_replace import replace_all_module
-from .tools.bnb_fc import replace_linear_by_bnb
-from .tools.bminf_int8 import replace_linear_by_bminf
+try:
+    from .tools.bnb_fc import replace_linear_by_bnb
+    from .tools.bminf_int8 import replace_linear_by_bminf
+except:
+    replace_linear_by_bnb=None
+    replace_linear_by_bminf=None

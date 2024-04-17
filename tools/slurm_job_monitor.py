@@ -14,9 +14,9 @@ def exec_cmd(cmd_with_args: list, shell=False, env=None) -> str:
     return results
 
 def launch_job(sbatch_file):
-    sbatch_cmd = f"sbatch {sbatch_file}"
+    sbatch_cmd = ["sbatch", sbatch_file]
     sbatch_env = copy.deepcopy(os.environ)
-    results = exec_cmd(sbatch_cmd, sbatch_env)
+    results = exec_cmd(sbatch_cmd, env=sbatch_env)
     print("start launch job\n")
     print(results)
     print('----'*10, flush=True)
@@ -65,22 +65,23 @@ def get_slurm_jobinfo(jobid):
     return job_info
 
 
-def scancel_slurm_job(job_id: str, env=None):
+def scancel_slurm_job(job_id: str):
     """
     scancel current slurm job.
     """
 
     # scancel jobid
     scancel_cmd = ["scancel", f"{job_id}"]
-    exec_cmd(scancel_cmd, env)
+    exec_cmd(scancel_cmd)
 
 def determine_job_is_alive(slurm_job_id: str):
     jobinfo = get_slurm_jobinfo(slurm_job_id)
     curjob_state = jobinfo["state"]
 
-    if curjob_state not in ["RUNNING", "PENDING"]:
+    if curjob_state not in ["RUNNING", "PENDING", "COMPLETED"]:
         exit_code = jobinfo["exitcode"]
         print(f"Job {slurm_job_id} is {curjob_state}, exit code: {exit_code}", flush=True)
+        scancel_slurm_job(slurm_job_id)
         return False
     elif curjob_state == 'COMPLETED':
         print('Job COMPLETED')
@@ -124,9 +125,9 @@ parser = argparse.ArgumentParser()
 
 if __name__ == "__main__":
     parser.add_argument("--cfg", type=str, help="sbatch file path")
-    parser.add_argument("--output", type=str, help="sbatch log file name")
-    parser.add_argument("--partition", type=str, help="slurm partition")
-    parser.add_argument("--ntasks", type=str, help="slurm ntasks")
-    parser.add_argument("--gpu_per_node", type=str, default=8, help="slurm gpu_per_node")
+    # parser.add_argument("--output", type=str, help="sbatch log file name")
+    # parser.add_argument("--partition", type=str, help="slurm partition")
+    # parser.add_argument("--ntasks", type=str, help="slurm ntasks")
+    # parser.add_argument("--gpu_per_node", type=str, default=8, help="slurm gpu_per_node")
     args = parser.parse_args()
     monitor_job(args.cfg)

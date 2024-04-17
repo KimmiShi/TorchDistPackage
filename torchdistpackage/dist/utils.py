@@ -8,8 +8,6 @@ from torch import nn
 from torch.nn import init
 
 
-_cudart = ctypes.CDLL('libcudart.so')
-
 def cu_prof_start():
     """
     This function and cu_prof_stop  are two functions used to do multi process Nsight Profiling.
@@ -20,14 +18,14 @@ def cu_prof_start():
             cu_prof_stop()
             exit()
     """
-    ret = _cudart.cudaProfilerStart()
+    ret = torch.cuda.cudart().cudaProfilerStart()
     if ret != 0:
         raise Exception('cudaProfilerStart() returned %d' % ret)
     else:
         print('cudaProfilerStart() returned %d' % ret)
 
 def cu_prof_stop():
-    ret = _cudart.cudaProfilerStop()
+    ret = torch.cuda.cudart().cudaProfilerStop()
     if ret != 0:
         raise Exception('cudaProfilerStop() returned %d' % ret)
     else:
@@ -46,7 +44,7 @@ def nvtx_decorator(func):
 
     return wrapped_fn
 
-class NVTX_Context(object):
+class NVTXContext(object):
     """ A simple context used to record performance info.
     """
 
