@@ -18,10 +18,10 @@ pip install -e . # or pip install . --user
 - simple example
 ```py
 import torch
-from torchdistpackage import setup_distributed_slurm,test_comm,tpc
+from torchdistpackage import setup_distributed,test_comm,tpc
 
 # init torch disttributed
-setup_distributed_slurm()
+setup_distributed()
 
 # init process groups
 pp_size=2

@@ -4,7 +4,7 @@ from collections import OrderedDict
 
 from torchdistpackage import ShardedEMA
 
-from torchdistpackage import setup_distributed_slurm, test_comm, fix_rand
+from torchdistpackage import setup_distributed, test_comm, fix_rand
 
 fix_rand()
 
@@ -57,7 +57,7 @@ def test_ema(model):
 
 import torchvision.models as models
 
-setup_distributed_slurm()
+setup_distributed()
 test_comm()
 
 model = models.resnet50().cuda()

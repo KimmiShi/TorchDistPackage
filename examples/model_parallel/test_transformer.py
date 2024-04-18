@@ -4,9 +4,9 @@ import torch.distributed as dist
 
 from torchdistpackage.parallel.tensor_parallel.transformer import Transformer
 
-from torchdistpackage import fix_rand, setup_distributed_slurm
+from torchdistpackage import fix_rand, setup_distributed
 
-setup_distributed_slurm()
+setup_distributed()
 fix_rand()
 
 

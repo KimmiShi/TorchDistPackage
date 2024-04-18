@@ -6,7 +6,7 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 
 import timm
 
-from torchdistpackage import setup_distributed_slurm, NaiveDDP, fix_rand,Bf16ZeroOptimizer
+from torchdistpackage import setup_distributed, NaiveDDP, fix_rand,Bf16ZeroOptimizer
 
 
 class MyModule(nn.Module):
@@ -20,7 +20,7 @@ class MyModule(nn.Module):
         return self.fc2(out)
 
 
-setup_distributed_slurm()
+setup_distributed()
 rank = dist.get_rank()
 
 
