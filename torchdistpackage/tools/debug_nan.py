@@ -94,3 +94,29 @@ def register_debug_nan_hooks(model):
         # bwd_hooks[name] = module.register_full_backward_hook(bwd_hook_wrapper(name))
     return fwd_hooks, bwd_hooks
 
+# debug grad norm
+
+def get_grad_norm(grads, norm_type=2.0):
+    norms = [torch.norm(g.detach(), norm_type) for g in grads if g is not None]
+    if len(norms)==0:
+        return 0
+    total_norm = torch.norm(torch.stack(norms), norm_type)
+    return total_norm
+
+def bwd_hook_wrapper(module_name='', max_grad_norm=0.1):
+    def check_value(module, grad_input, grad_output):
+        out_grad_norm = get_grad_norm(grad_output)
+        in_grad_norm = get_grad_norm(grad_input)
+        if out_grad_norm > max_grad_norm:
+            if dist.get_rank()==0:
+                print(module_name, "grad_output norm:", out_grad_norm, flush=True)
+        if in_grad_norm > max_grad_norm:
+            if dist.get_rank()==0:
+                print(module_name, "grad_input norm:", in_grad_norm, flush=True)
+    return check_value
+
+def register_debug_hooks(model):
+    bwd_hooks = {}
+    for name, module in model.named_modules():
+        bwd_hooks[name] = module.register_full_backward_hook(bwd_hook_wrapper(name))
+    return bwd_hooks
