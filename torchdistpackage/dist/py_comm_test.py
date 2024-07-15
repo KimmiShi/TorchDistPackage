@@ -5,7 +5,7 @@ import torch.distributed as dist
 import time
 import functools
 
-from torchdistpackage import setup_distributed_slurm
+from torchdistpackage import setup_distributed
 
 # reference: https://github.com/NVIDIA/nccl-tests/blob/master/doc/PERFORMANCE.md
 # algbw = Size/time
@@ -79,6 +79,6 @@ def test_all2all_balanced(ele_num, group=None):
 
 
 if __name__=="__main__":
-    setup_distributed_slurm()
+    setup_distributed()
 
     test_collection(1801705472*2, mode='all_gather')

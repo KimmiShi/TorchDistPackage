@@ -3,9 +3,9 @@ import torch.distributed as dist
 
 from torchdistpackage.parallel import Attention,TpAttention
 
-from torchdistpackage import fix_rand, setup_distributed_slurm
+from torchdistpackage import fix_rand, setup_distributed
 
-setup_distributed_slurm()
+setup_distributed()
 fix_rand()
 
 def test_attn(nh=8, in_dim=1024, drop=0., seq_len=128):

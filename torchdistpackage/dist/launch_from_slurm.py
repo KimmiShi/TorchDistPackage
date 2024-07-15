@@ -13,7 +13,7 @@ def find_free_port():
         s.bind(("", 0))
         return str(s.getsockname()[1])
 
-def setup_distributed_slurm(backend="nccl", port=None):
+def setup_distributed(backend="nccl", port=None):
     """Initialize distributed training environment.
     support both slurm and torch.distributed.launch
     see torch.distributed.init_process_group() for more details
@@ -60,3 +60,6 @@ def setup_distributed_slurm(backend="nccl", port=None):
     torch.cuda.set_device(device)
     print(f"dist init done, world_size = {dist.get_world_size()}")
     return rank, world_size, port, addr
+
+
+setup_distributed=setup_distributed

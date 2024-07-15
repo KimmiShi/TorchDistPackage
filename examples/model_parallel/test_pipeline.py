@@ -8,7 +8,7 @@ import torch
 from torch.utils.data import DataLoader, Dataset
 from torch.utils.data.distributed import DistributedSampler
 
-from torchdistpackage import tpc, setup_distributed_slurm, test_comm
+from torchdistpackage import tpc, setup_distributed, test_comm
 from torchdistpackage.parallel import partition_uniform, forward_backward
 
 
@@ -65,7 +65,7 @@ NUM_CHUNKS = 2
 NUM_MICRO_BATCHES = 4
 
 
-setup_distributed_slurm()
+setup_distributed()
 world_size = int(os.environ["SLURM_NTASKS"])
 pp_size = 2
 dist_config = [("pipe", pp_size), ("data", world_size / (pp_size))]

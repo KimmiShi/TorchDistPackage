@@ -74,3 +74,16 @@ layer1.1.conv1: MEM: 13 MB; Time: 0.5373 ms
 ......
 
 ```
+
+# torch flops profile
+
+```py
+from torch.utils.flop_counter import FlopCounterMode
+from triton.testing import do_bench
+
+def get_flops(f):
+    flop_counter = FlopCounterMode(display=False)
+    with flop_counter:
+        f()
+    total_flops = flop_counter.get_total_flops()
+```

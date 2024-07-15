@@ -2,9 +2,9 @@
 
 ```py
 # 1. setup moe dp group
-from torchdistpackage import tpc, setup_distributed_slurm
+from torchdistpackage import tpc, setup_distributed
 
-setup_distributed_slurm()
+setup_distributed()
 pp_size=2
 dist_config = [('data',world_size/(2*pp_size)), ('pipe',pp_size), ('tensor',2)]
 tpc.setup_process_groups(dist_config)

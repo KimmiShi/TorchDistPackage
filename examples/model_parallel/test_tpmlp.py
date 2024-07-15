@@ -1,7 +1,7 @@
 import torch
 import torch.distributed as dist
 
-from torchdistpackage import setup_distributed_slurm
+from torchdistpackage import setup_distributed
 from torchdistpackage import fix_rand
 
 from torchdistpackage.parallel import TpMlp, Mlp
@@ -44,5 +44,5 @@ def test_mlp(dim1=1024, in_feat=2048, outfeat=2048, hiddenfeat=8192):
 
 if __name__=='__main__':
     fix_rand()
-    setup_distributed_slurm()
+    setup_distributed()
     test_mlp()
