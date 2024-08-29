@@ -7,6 +7,27 @@ import torch
 from torch import nn
 from torch.nn import init
 
+class Timer(object):
+    """ A simple context used to record performance info.
+    """
+
+    def __init__(self, context_name, record_time=False):
+        self.start_time = None
+        self.exit_time = None
+        self.record_time = record_time
+        self.synchronize = False
+
+    def __enter__(self):
+        if self.record_time:
+            torch.cuda.synchronize()
+            self.start_time = time.time()
+
+    def __exit__(self, type, value, traceback):
+        if self.record_time:
+            torch.cuda.synchronize()
+            self.exit_time = time.time()
+            timecost = self.exit_time - self.start_time
+            print(f"{self.context_name} duration is {round(timecost*1e3, 3)} ms")
 
 def cu_prof_start():
     """
